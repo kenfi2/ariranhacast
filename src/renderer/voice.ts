@@ -262,6 +262,60 @@ export class Voice {
     last.connect(this.micGain);
   }
 
+  /** Nível atual do microfone, de 0 a 1 (para o medidor do teste). */
+  selfLevel(): number {
+    const db = levelDb(this.selfAnalyser, this.buf);
+    return Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 60) / 60)) : 0;
+  }
+
+  testing = false;
+
+  /**
+   * Teste de voz: grava alguns segundos do microfone do jeito que os amigos ouvem (com a
+   * supressão de ruído escolhida) e toca de volta na saída das vozes.
+   */
+  async testMic(onstate: (state: 'gravando' | 'tocando' | 'fim', error?: string) => void, seconds = 4): Promise<void> {
+    if (this.testing) return;
+    this.testing = true;
+    const wasOn = this.micOn;
+    let tap: MediaStreamAudioDestinationNode | null = null;
+    try {
+      if (!wasOn) {
+        await this.setMic(true);
+        if (!this.micOn) throw new Error(this.micError || 'Microfone indisponível.');
+      }
+      tap = this.ctx.createMediaStreamDestination();
+      this.micGain.connect(tap);
+      const rec = new MediaRecorder(tap.stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      const stopped = new Promise<void>((resolve) => (rec.onstop = () => resolve()));
+      rec.start();
+      onstate('gravando');
+      await new Promise((r) => setTimeout(r, seconds * 1000));
+      rec.stop();
+      await stopped;
+      if (!wasOn) await this.setMic(false);
+      const url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
+      const audio = new Audio(url);
+      audio.volume = this.prefs.volume;
+      if (this.prefs.sinkId) await (audio as any).setSinkId?.(this.prefs.sinkId).catch(() => {});
+      onstate('tocando');
+      await new Promise<void>((resolve) => {
+        audio.onended = audio.onerror = () => resolve();
+        void audio.play().catch(() => resolve());
+      });
+      URL.revokeObjectURL(url);
+      onstate('fim');
+    } catch (e: any) {
+      if (!wasOn && this.micOn) await this.setMic(false);
+      onstate('fim', e?.message ?? String(e));
+    } finally {
+      if (tap) this.micGain.disconnect(tap);
+      this.testing = false;
+    }
+  }
+
   private closeMic(): void {
     for (const n of this.micNodes) n.disconnect();
     this.micNodes = [];

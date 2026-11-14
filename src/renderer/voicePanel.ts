@@ -48,8 +48,38 @@ export function mountVoicePanel(container: HTMLElement, voice: Voice, onupdate: 
   master.oninput = () => voice.setMasterVolume(Number(master.value));
   masterLabel.append(master);
 
+  // Teste de voz: grava 4 s e toca de volta, para ouvir como os amigos ouvem.
+  const testBox = el('div', 'voice-test');
+  const testBtn = el('button', 'ghost', 'Testar minha voz');
+  testBtn.type = 'button';
+  const testMeter = el('div', 'meter');
+  const testLevel = el('div');
+  testMeter.append(testLevel);
+  testMeter.hidden = true;
+  const testNote = el('div', 'muted');
+  testBox.append(testBtn, testMeter, testNote);
+  let levelTimer = 0;
+  testBtn.onclick = () => {
+    testBtn.disabled = true;
+    void voice.testMic((state, err) => {
+      clearInterval(levelTimer);
+      if (state === 'gravando') {
+        testMeter.hidden = false;
+        testNote.textContent = 'Gravando 4 s: fale alguma coisa… (quem está na sala também ouve)';
+        levelTimer = window.setInterval(() => (testLevel.style.width = `${Math.round(voice.selfLevel() * 100)}%`), 80);
+      } else if (state === 'tocando') {
+        testLevel.style.width = '0';
+        testNote.textContent = 'Tocando de volta: é assim que os amigos te ouvem.';
+      } else {
+        testMeter.hidden = true;
+        testNote.textContent = err ? `Não deu para testar: ${err}` : 'Teste concluído. Se ficou baixo ou com ruído, troque o microfone ou a supressão de ruído acima.';
+        testBtn.disabled = false;
+      }
+    });
+  };
+
   const list = el('ul', 'voice-list');
-  container.append(title, error, nsLabel, micLabel, outLabel, streamOutLabel, masterLabel, list);
+  container.append(title, error, nsLabel, micLabel, outLabel, streamOutLabel, masterLabel, testBox, list);
 
   const fill = (sel: HTMLSelectElement, devices: MediaDeviceInfo[], current: string, fallback: string) => {
     sel.replaceChildren(new Option('Padrão do sistema', ''));
@@ -129,6 +159,7 @@ export function mountVoicePanel(container: HTMLElement, voice: Voice, onupdate: 
   render();
 
   return () => {
+    clearInterval(levelTimer);
     navigator.mediaDevices.removeEventListener('devicechange', fillDevices);
     voice.onchange = () => {};
     container.replaceChildren();

@@ -12,6 +12,7 @@ hardware, bitrate adaptativo.
 - **Pausar** a transmissão sem encerrar; trocar de janela continua sem derrubar ninguém.
 - **Perfis de qualidade**: Jogo 60 FPS, Equilibrado, Economia, Texto nítido.
 - **Qualidade por espectador**: quem assiste escolhe Máxima, Média ou Baixa.
+- **Testar minha voz**: grava 4 s e toca de volta, para ouvir como os amigos te ouvem.
 - **Medidor de conexão** por pessoa (ping, perda, jitter) no painel de voz.
 - **Salas recentes**, botão **Convite** e link `ariranhacast://entrar/CODIGO`.
 - **Rede**: teste real de IPv6, **relatório de conexão** copiável, **modo econômico no TURN** (vídeo limitado a ~2,5 Mbps/30 fps quando passa pelo TURN), aviso da franquia, e quem depende do TURN **não transmite a tela**.

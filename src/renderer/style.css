@@ -216,3 +216,7 @@ button.round.dim { opacity: .45; }
 button.round { width: 42px; height: 42px; }
 button.round.hangup { width: 54px; }
 .ctl-center { gap: 8px; }
+.voice-test { margin: 4px 0 12px; }
+.voice-test .meter { margin-top: 8px; }
+.voice-test .meter > div { height: 100%; background: var(--ok); width: 0; }
+.voice-test .muted { margin-top: 6px; font-size: 12px; }

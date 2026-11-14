@@ -1522,7 +1522,8 @@ if (testing) {
         if (!cur) return;
         const other = cur.roster.find((p) => p.id !== cur.selfId);
         log('act', what);
-        if (what === 'clip') void saveClip();
+        if (what === 'voicetest') void voice?.testMic((st, err) => log('voicetest', st, err ?? ''), 2);
+        else if (what === 'clip') void saveClip();
         else if (what === 'report') $('btn-report').click();
         else if (what === 'pause') $('btn-pause').click();
         else if (what === 'lowq') for (const w of watches.values()) w.watch.setQuality('low');
