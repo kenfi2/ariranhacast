@@ -18,7 +18,11 @@ export interface AriranhaBridge {
   setInRoom(on: boolean, micOn: boolean): Promise<void>;
   appVersion(): Promise<string>;
   onUpdate(cb: (text: string) => void): void;
+  firewallStatus(): Promise<FirewallState>;
+  firewallFix(): Promise<FirewallState>;
 }
+
+export type FirewallState = 'ok' | 'missing' | 'blocked' | 'unknown' | 'na';
 
 declare global {
   interface Window {

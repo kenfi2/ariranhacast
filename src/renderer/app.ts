@@ -63,7 +63,32 @@ $('btn-settings').onclick = () => {
   $<HTMLTextAreaElement>('set-ice').value = settings.iceServers;
   $<HTMLInputElement>('set-hot-mic').value = settings.hotMic;
   $<HTMLInputElement>('set-hot-deaf').value = settings.hotDeaf;
+  void refreshFirewall();
   $<HTMLDialogElement>('dlg-settings').showModal();
+};
+
+const FW_TEXT: Record<string, string> = {
+  ok: '✓ Firewall do Windows: liberado para o AriranhaCast.',
+  missing: '⚠ Firewall do Windows: o app ainda não foi liberado. Isso pode barrar a conexão dos amigos.',
+  blocked: '⚠ Firewall do Windows: este programa está bloqueado.',
+};
+async function refreshFirewall(): Promise<void> {
+  const st = await window.ariranhacast.firewallStatus().catch(() => 'unknown' as const);
+  const row = $('fw-row');
+  row.hidden = !FW_TEXT[st];
+  if (row.hidden) return;
+  $('fw-text').textContent = FW_TEXT[st];
+  $<HTMLButtonElement>('btn-fw').hidden = st === 'ok';
+}
+$('btn-fw').onclick = async () => {
+  const btn = $<HTMLButtonElement>('btn-fw');
+  btn.disabled = true;
+  btn.textContent = 'Aguardando permissão…';
+  const st = await window.ariranhacast.firewallFix().catch(() => 'unknown' as const);
+  btn.disabled = false;
+  btn.textContent = 'Liberar no Firewall';
+  await refreshFirewall();
+  toast(st === 'ok' ? 'Firewall liberado.' : 'Não foi possível liberar (a permissão foi negada?).');
 };
 $<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
   const ice = $<HTMLTextAreaElement>('set-ice').value.trim();
@@ -189,22 +214,82 @@ let focusKey = '';
 let pollTimer = 0;
 let busy = false;
 
+// Tentativa de entrar/criar em andamento: mostra o progresso e permite cancelar.
+interface Attempt {
+  create: boolean;
+  room: Room | null;
+  cancelled: boolean;
+}
+let attempt: Attempt | null = null;
+let attemptTimer = 0;
+
+function connectingText(create: boolean, secs: number): string {
+  if (create) return secs < 6 ? 'Abrindo a sala…' : `Ainda abrindo a sala… (${secs} s)`;
+  if (secs < 3) return 'Procurando a sala…';
+  if (secs < 8) return `Conectando com quem hospeda… (${secs} s)`;
+  return `Ainda tentando; redes restritas podem levar até 15 s… (${secs} s)`;
+}
+
+function setConnecting(on: boolean, create = false): void {
+  const bc = $<HTMLButtonElement>('btn-create');
+  const bj = $<HTMLButtonElement>('btn-join');
+  bc.disabled = bj.disabled = on;
+  for (const id of ['create-pass', 'join-code', 'join-pass']) $<HTMLInputElement>(id).disabled = on;
+  bc.textContent = on && create ? 'Criando…' : 'Criar sala';
+  bj.textContent = on && !create ? 'Conectando…' : 'Entrar';
+  bc.classList.toggle('busy', on && create);
+  bj.classList.toggle('busy', on && !create);
+  $('home-status').hidden = !on;
+  clearInterval(attemptTimer);
+  if (on) {
+    const t0 = Date.now();
+    const update = () => ($('home-status-text').textContent = connectingText(create, Math.floor((Date.now() - t0) / 1000)));
+    update();
+    attemptTimer = window.setInterval(update, 500);
+  }
+}
+
+function endAttempt(a: Attempt): void {
+  if (attempt !== a) return; // uma tentativa mais nova já assumiu a tela
+  attempt = null;
+  busy = false;
+  setConnecting(false);
+}
+
+$('btn-cancel').onclick = () => {
+  const a = attempt;
+  if (!a) return;
+  a.cancelled = true;
+  a.room?.leave();
+  endAttempt(a);
+  toast('Conexão cancelada.');
+};
+
 async function enterRoom(create: boolean, code?: string, password = ''): Promise<void> {
   if (room || busy) return;
   busy = true;
+  const my: Attempt = { create, room: null, cancelled: false };
+  attempt = my;
+  setConnecting(true, create);
   const ice = await loadIce(settings);
+  if (my.cancelled) return;
   if (!ice.ok) toast(`Não foi possível carregar o servidor TURN das Configurações (${ice.error}). Seguindo sem ele.`);
   const r = new Room(settings, appVersion || '0', password);
+  my.room = r;
   try {
     if (create) await r.create(code);
     else await r.join(code!);
   } catch (e: any) {
-    busy = false;
-    toast(e?.message ?? String(e));
+    endAttempt(my);
+    if (!my.cancelled) toast(e?.message ?? String(e));
     log('room fail', String(e?.message ?? e));
     return;
   }
-  busy = false;
+  if (my.cancelled) {
+    r.leave(); // deu certo, mas a pessoa já tinha cancelado
+    return;
+  }
+  endAttempt(my);
   room = r;
   const inRoomNow = (id: string) => r.isMember(id);
   voice = new Voice(r.peer, settings.name, inRoomNow);

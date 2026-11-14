@@ -87,6 +87,9 @@ e o `latest.yml`. Os apps instalados passam a checar essa pasta, baixar a versã
 o SHA-512 e instalar ao fechar. Quem controla essa pasta controla o que roda no PC dos seus
 amigos: proteja-a. Só funciona no app instalado pelo instalador, não no portátil.
 
+Firewall do Windows: na primeira abertura o app pergunta se pode liberar o programa (pedido de administrador do
+Windows). Quem recusar pode liberar depois em Configurações.
+
 Segurança: veja `SEGURANCA.md`.
 
 ## Desenvolver

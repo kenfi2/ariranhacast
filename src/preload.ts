@@ -19,4 +19,6 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   onHotkey: (cb: (which: 'mic' | 'deaf' | 'leave') => void) => on('lc:hotkey', cb),
   setInRoom: (inRoom: boolean, micOn: boolean) => ipcRenderer.invoke('lc:inroom', inRoom, micOn),
   onUpdate: (cb: (text: string) => void) => on('lc:update', cb),
+  firewallStatus: () => ipcRenderer.invoke('lc:firewall-status'),
+  firewallFix: () => ipcRenderer.invoke('lc:firewall-fix'),
 });

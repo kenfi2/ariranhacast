@@ -25,10 +25,15 @@
         <p>Digite o código que te passaram.</p>
         <form id="join-form">
           <input id="join-code" placeholder="CÓDIGO" maxlength="8" autocomplete="off" spellcheck="false" />
-          <button class="primary" type="submit">Entrar</button>
+          <button id="btn-join" class="primary" type="submit">Entrar</button>
         </form>
         <input id="join-pass" type="password" maxlength="64" placeholder="Senha (se a sala tiver)" autocomplete="off" />
       </section>
+      <div id="home-status" class="connecting" role="status" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="home-status-text"></span>
+        <button id="btn-cancel" type="button" class="ghost">Cancelar</button>
+      </div>
     </main>
 
     <!-- Sala -->
@@ -162,6 +167,10 @@
           <button id="btn-netcheck" type="button" class="ghost">Testar minha rede</button>
         </div>
         <pre id="netcheck-out" class="netcheck" hidden></pre>
+        <div id="fw-row" class="row between" hidden>
+          <span id="fw-text" class="muted"></span>
+          <button id="btn-fw" type="button" class="ghost">Liberar no Firewall</button>
+        </div>
         <div class="row end">
           <button id="set-save" class="primary" value="save">Salvar</button>
         </div>

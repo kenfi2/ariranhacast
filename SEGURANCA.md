@@ -89,3 +89,21 @@ for igual, o arquivo é o mesmo que foi gerado.
   executável). A estrutura do executável foi validada e os testes rodaram em Linux.
 - O instalador e a atualização automática de ponta a ponta.
 - Uma auditoria independente. Esta revisão foi feita por quem escreveu o código.
+
+## Liberação no Firewall do Windows (0.3.1)
+
+Ao abrir, o app confere (sem permissão especial) se existe uma regra de entrada do Firewall para o
+`AriranhaCast.exe`. Se não existir, pergunta uma vez e, só se a pessoa aceitar, cria a regra com o
+pedido de administrador do próprio Windows (UAC).
+
+- O script é montado na memória, usa só o caminho do próprio executável (`process.execPath`) e vai ao
+  PowerShell por `-EncodedCommand`: nenhum arquivo é gravado nem executado, então outro programa não
+  tem o que trocar entre a escolha e a execução.
+- A regra vale só para esse programa (entrada, todos os perfis de rede). Regras antigas do Windows para o
+  mesmo caminho (inclusive a de bloqueio criada ao fechar o aviso da primeira execução) são substituídas.
+- Se a pessoa recusar, o app não pergunta de novo; o botão fica em Configurações.
+- O desinstalador não pede administrador e por isso não remove a regra. Ela fica inofensiva (aponta para
+  um programa que não existe mais) e pode ser apagada em "Firewall do Windows com Segurança Avançada".
+- Não foi testado em um Windows real (só em Linux): se o pedido não aparecer, o app segue funcionando e
+  o botão em Configurações mostra o estado.
+

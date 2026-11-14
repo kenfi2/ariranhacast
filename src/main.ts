@@ -1,6 +1,6 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, session, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, session, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -184,6 +184,130 @@ function createTray(): void {
   }
 }
 
+// ---------- Firewall do Windows ----------
+// Sem uma regra de entrada para o programa, o Windows pode barrar a conexão direta dos amigos
+// (é o que acontece quando alguém fecha o aviso "Permitir acesso" da primeira execução).
+// O app confere a regra, pergunta uma vez e, se a pessoa aceitar, cria a regra com o pedido
+// de administrador do próprio Windows (UAC). O script é montado na memória, só com o caminho
+// do próprio executável, e vai por -EncodedCommand: nenhum arquivo é gravado nem executado.
+type FwState = 'ok' | 'missing' | 'blocked' | 'unknown' | 'na';
+const FW_RULE_NAME = 'AriranhaCast';
+const FW_SUPPORTED = process.platform === 'win32' && !dev;
+
+const psQuote = (v: string): string => `'${v.replace(/'/g, "''")}'`;
+
+function fwCheckScript(exe: string): string {
+  return `$p = ${psQuote(exe)}
+try {
+  $pol = New-Object -ComObject HNetCfg.FwPolicy2
+  $allow = $false; $block = $false
+  foreach ($r in $pol.Rules) {
+    if ($r.Enabled -and $r.Direction -eq 1 -and $r.ApplicationName -and ($r.ApplicationName -ieq $p)) {
+      if ($r.Action -eq 1) { $allow = $true } else { $block = $true }
+    }
+  }
+  if ($block) { 'blocked' } elseif ($allow) { 'ok' } else { 'missing' }
+} catch { 'unknown' }`;
+}
+
+function fwFixScript(exe: string): string {
+  return `$p = ${psQuote(exe)}
+$pol = New-Object -ComObject HNetCfg.FwPolicy2
+$names = @()
+foreach ($r in $pol.Rules) { if ($r.Direction -eq 1 -and $r.ApplicationName -and ($r.ApplicationName -ieq $p)) { $names += $r.Name } }
+foreach ($n in ($names | Select-Object -Unique)) { $pol.Rules.Remove($n) }
+$rule = New-Object -ComObject HNetCfg.FWRule
+$rule.Name = ${psQuote(FW_RULE_NAME)}
+$rule.Description = 'Permite conexões de entrada do AriranhaCast (voz, webcam e transmissão entre amigos).'
+$rule.ApplicationName = $p
+$rule.Direction = 1
+$rule.Action = 1
+$rule.Enabled = $true
+$rule.Profiles = 2147483647
+$pol.Rules.Add($rule)`;
+}
+
+function runPowerShell(script: string, elevated: boolean, timeoutMs: number): Promise<{ ok: boolean; out: string }> {
+  return new Promise((resolve) => {
+    const enc = Buffer.from(script, 'utf16le').toString('base64');
+    const base = ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden'];
+    const args = elevated
+      ? [
+          ...base,
+          '-Command',
+          `Start-Process -FilePath powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','${enc}'`,
+        ]
+      : [...base, '-EncodedCommand', enc];
+    try {
+      execFile('powershell.exe', args, { windowsHide: true, timeout: timeoutMs }, (err, stdout) => resolve({ ok: !err, out: String(stdout ?? '').trim() }));
+    } catch {
+      resolve({ ok: false, out: '' });
+    }
+  });
+}
+
+async function firewallState(): Promise<FwState> {
+  if (!FW_SUPPORTED) return 'na';
+  const r = await runPowerShell(fwCheckScript(process.execPath), false, 20_000);
+  const v = r.out.split(/\s+/).pop();
+  return v === 'ok' || v === 'missing' || v === 'blocked' ? v : 'unknown';
+}
+
+/** Cria a regra (o Windows mostra o pedido de administrador). Devolve o estado depois. */
+async function firewallFix(): Promise<FwState> {
+  if (!FW_SUPPORTED) return 'na';
+  await runPowerShell(fwFixScript(process.execPath), true, 120_000);
+  return firewallState();
+}
+
+const fwPrefFile = (): string => path.join(app.getPath('userData'), 'firewall.json');
+function fwDeclined(): boolean {
+  try {
+    return JSON.parse(fs.readFileSync(fwPrefFile(), 'utf8'))?.declinedFor === process.execPath;
+  } catch {
+    return false;
+  }
+}
+function fwRememberDecline(on: boolean): void {
+  try {
+    fs.writeFileSync(fwPrefFile(), JSON.stringify(on ? { declinedFor: process.execPath } : {}));
+  } catch {
+    /* sem preferência salva */
+  }
+}
+
+/** Na abertura: se faltar a regra, pergunta (uma vez) e libera. */
+async function ensureFirewall(): Promise<void> {
+  if (!FW_SUPPORTED || fwDeclined()) return;
+  const state = await firewallState();
+  if (state !== 'missing' && state !== 'blocked') return;
+  if (!win || win.isDestroyed()) return;
+  const choice = await dialog.showMessageBox(win, {
+    type: 'question',
+    buttons: ['Liberar', 'Agora não'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'AriranhaCast',
+    message: 'Liberar o AriranhaCast no Firewall do Windows?',
+    detail:
+      'Sem isso, o Windows pode bloquear a conexão dos seus amigos.\n\n' +
+      'Vai aparecer o pedido de permissão do Windows (administrador). O app cria uma regra só para o AriranhaCast.exe.' +
+      (state === 'blocked' ? '\n\nHoje o Windows está bloqueando este programa: a regra de bloqueio será substituída.' : ''),
+  });
+  if (choice.response !== 0) {
+    fwRememberDecline(true);
+    send('lc:update', 'Tudo bem. Se alguém não conseguir conectar, libere o app em Configurações > Firewall.');
+    return;
+  }
+  const after = await firewallFix();
+  if (after === 'ok') {
+    fwRememberDecline(false);
+    send('lc:update', 'Firewall liberado. O AriranhaCast já pode receber conexões dos amigos.');
+  } else {
+    send('lc:update', 'Não consegui liberar o Firewall (a permissão foi negada?). Dá pra tentar de novo em Configurações.');
+  }
+}
+
 // ---------- atualização automática ----------
 // Só existe no app instalado pelo instalador e só quando o pacote foi gerado com
 // "ariranhacast.updateUrl" (HTTPS) preenchido em package.json; nesse caso o instalador grava
@@ -336,6 +460,12 @@ app.whenReady().then(() => {
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
   handle('lc:hotkeys', (keys: unknown) => setHotkeys(keys));
+  handle('lc:firewall-status', () => firewallState());
+  handle('lc:firewall-fix', async () => {
+    const st = await firewallFix();
+    if (st === 'ok') fwRememberDecline(false);
+    return st;
+  });
   handle('lc:inroom', (on: unknown, mic: unknown) => {
     inRoom = on === true;
     micOn = mic === true;
@@ -345,6 +475,8 @@ app.whenReady().then(() => {
   createTray();
   createWindow();
   startUpdater();
+  // Depois da janela aparecer, para o pedido não surgir antes da tela do app.
+  win?.webContents.once('did-finish-load', () => setTimeout(() => void ensureFirewall().catch(() => {}), 1500));
 });
 
 app.on('before-quit', () => (quitting = true));
