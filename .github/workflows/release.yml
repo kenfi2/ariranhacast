@@ -48,5 +48,10 @@ jobs:
           ls -la
           test -f "AriranhaCast-Setup-${GITHUB_REF_NAME#v}.exe"
           test -f latest.yml
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AriranhaCast ${GITHUB_REF_NAME#v}" --generate-notes \
-            AriranhaCast-Setup-*.exe AriranhaCast-portatil-*.zip latest.yml SHA256SUMS.txt
+          files="AriranhaCast-Setup-*.exe AriranhaCast-portatil-*.zip latest.yml SHA256SUMS.txt"
+          # Se a release já existe (criada pelo site), só anexa os arquivos; senão, cria.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber $files
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AriranhaCast ${GITHUB_REF_NAME#v}" --generate-notes $files
+          fi
