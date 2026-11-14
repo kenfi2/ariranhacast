@@ -1,0 +1,52 @@
+# Publica uma versão sozinho: ao enviar uma tag "vX.Y.Z", gera o instalador e cria a release
+# com tudo o que a atualização automática precisa (o .exe, o latest.yml e os hashes).
+#
+#   npm version 0.4.1 --no-git-tag-version   (ou edite "version" no package.json)
+#   git commit -am "AriranhaCast 0.4.1" && git tag v0.4.1 && git push origin main v0.4.1
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: A tag confere com o package.json
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::A tag é $GITHUB_REF_NAME, mas o package.json diz $v. Sem isso o app não reconheceria a atualização."
+            exit 1
+          fi
+
+      - name: Ferramentas do instalador (NSIS e zip)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nsis zip
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run dist
+        env:
+          MAKENSIS: makensis
+
+      - name: Criar a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          ls -la
+          test -f "AriranhaCast-Setup-${GITHUB_REF_NAME#v}.exe"
+          test -f latest.yml
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AriranhaCast ${GITHUB_REF_NAME#v}" --generate-notes \
+            AriranhaCast-Setup-*.exe AriranhaCast-portatil-*.zip latest.yml SHA256SUMS.txt

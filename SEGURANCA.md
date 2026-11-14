@@ -107,3 +107,14 @@ pedido de administrador do próprio Windows (UAC).
 - Não foi testado em um Windows real (só em Linux): se o pedido não aparecer, o app segue funcionando e
   o botão em Configurações mostra o estado.
 
+
+## Novidades da 0.4.0 e o que elas mudam na segurança
+
+- **Chat.** Texto, imagens e emotes chegam de outras pessoas da sala, então são tratados como não confiáveis: o texto é exibido só como texto (nunca como HTML), com caracteres de controle removidos; imagens são aceitas apenas se os primeiros bytes forem de PNG, JPEG, GIF ou WebP (o tipo declarado é ignorado), com limite de 4 MB (emotes: 128 KB) e de 16 MB por pessoa por minuto. Quem hospeda define autor e horário de cada mensagem, então ninguém consegue escrever em nome de outro. O chat fica só na memória e some ao sair; não é criptografado além do que o WebRTC já faz, e quem hospeda a sala vê tudo.
+- **Links.** Um clique abre o link no navegador padrão, e só `http://`/`https://`. O app não carrega prévias nem imagens de links, para não revelar seu IP a sites de terceiros. Cuidado normal com links continua valendo.
+- **GIFs.** A busca é opcional e usa a sua chave do Giphy; o Giphy vê o seu IP e o que você procura. O GIF escolhido é baixado pelo seu PC e enviado aos amigos pela sala, então eles não falam com o Giphy.
+- **Overlay.** É uma segunda janela do próprio app, transparente, que ignora cliques e só recebe nomes e estado de fala.
+- **Clipes.** O replay fica só na memória; nada é gravado em disco até você pedir. Ao clipar a transmissão de outra pessoa você está gravando a tela dela: combine antes. Os arquivos só são gravados em Vídeos/AriranhaCast.
+- **Link de convite.** O app registra `ariranhacast://` no Windows. Só o formato `ariranhacast://entrar/CODIGO` é aceito, e ele apenas preenche o código e tenta entrar; senha nunca vai no link.
+- **Instância única.** Abrir o app de novo só traz a janela existente para frente.
+- **Não verificado em Windows real:** overlay sobre jogos, clipes em H.264/MP4 (no Linux de teste sai WebM), registro do link de convite, e o workflow de release.

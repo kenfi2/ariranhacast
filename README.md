@@ -4,6 +4,21 @@ Sala de voz P2P para um grupo pequeno de amigos, com webcam e transmissão de te
 latência. Mesmo pipeline do Discord: WebRTC (libwebrtc do Chromium) sobre UDP, encoder por
 hardware, bitrate adaptativo.
 
+## Novidades da 0.4.0
+
+- **Chat de texto** na sala: links clicáveis, imagens e GIFs (colar, arrastar ou botão; até 4 MB), emojis, **emotes da sala** (`:nome:`, até 50), `**negrito**`, `*itálico*`, `~~riscado~~`, `` `código` ``, "fulano está digitando", apagar mensagem, aviso de não lidas. Busca de GIFs dentro do app com uma chave gratuita do Giphy (Configurações > Chat).
+- **Overlay** mostrando quem está falando por cima do jogo (dá para desligar, escolher o canto e mostrar todos ou só quem fala). Não aparece em tela cheia exclusiva.
+- **Clipes**: atalho (padrão Ctrl+Shift+C) ou botão salvam os últimos 30–60 s (ou 60–120 s) da sua transmissão ou da que você assiste em Vídeos/AriranhaCast.
+- **Pausar** a transmissão sem encerrar; trocar de janela continua sem derrubar ninguém.
+- **Perfis de qualidade**: Jogo 60 FPS, Equilibrado, Economia, Texto nítido.
+- **Qualidade por espectador**: quem assiste escolhe Máxima, Média ou Baixa.
+- **Medidor de conexão** por pessoa (ping, perda, jitter) no painel de voz.
+- **Salas recentes**, botão **Convite** e link `ariranhacast://entrar/CODIGO`.
+- **Rede**: teste real de IPv6, **relatório de conexão** copiável, **modo econômico no TURN** (vídeo limitado a ~2,5 Mbps/30 fps quando passa pelo TURN), aviso da franquia, e quem depende do TURN **não transmite a tela**.
+- **Releases automáticas** por GitHub Actions: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+Todos na sala precisam estar na 0.4.0 (o protocolo mudou).
+
 ## Usar
 
 - **Criar sala** gera um código de 6 caracteres; os amigos usam **Entrar** com esse código.

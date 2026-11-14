@@ -1,0 +1,13 @@
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 600 13px/1.2 "Segoe UI", system-ui, sans-serif; color: #fff; user-select: none; }
+body { display: flex; }
+#list { display: flex; flex-direction: column; gap: 4px; padding: 2px; }
+body[data-corner="tr"] { justify-content: flex-end; align-items: flex-start; }
+body[data-corner="tl"] { justify-content: flex-start; align-items: flex-start; }
+body[data-corner="br"] { justify-content: flex-end; align-items: flex-end; }
+body[data-corner="bl"] { justify-content: flex-start; align-items: flex-end; }
+body[data-corner$="r"] #list { align-items: flex-end; }
+.row { display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 999px; background: rgba(12, 14, 18, 0.72); opacity: 0.55; max-width: 240px; }
+.row.speaking { opacity: 1; box-shadow: 0 0 0 2px #3ddc84; }
+.row.muted .name { text-decoration: line-through; opacity: 0.7; }
+.dot { width: 22px; height: 22px; border-radius: 50%; background: var(--c, #7c8cff); display: grid; place-items: center; font-size: 12px; flex: none; }
+.name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; }

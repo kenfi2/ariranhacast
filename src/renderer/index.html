@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src https: wss: http: ws:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https: wss: http: ws:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
     <title>AriranhaCast</title>
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -34,6 +34,10 @@
           <button id="btn-join" class="primary" type="submit">Entrar</button>
         </form>
         <input id="join-pass" type="password" maxlength="64" placeholder="Senha (se a sala tiver)" autocomplete="off" />
+        <div id="recent" hidden>
+          <div class="label">Salas recentes</div>
+          <ul id="recent-list"></ul>
+        </div>
       </section>
       <div id="home-status" class="connecting" role="status" hidden>
         <span class="spinner" aria-hidden="true"></span>
@@ -51,13 +55,16 @@
           <div class="ctl-left">
             <span class="label-inline">Sala</span>
             <span id="room-code" class="code"></span>
-            <button id="btn-copy" class="ghost small">Copiar</button>
+            <button id="btn-copy" class="ghost small" title="Copia só o código">Copiar</button>
+            <button id="btn-invite" class="ghost small" title="Copia uma mensagem pronta com o código e o link">Convite</button>
           </div>
           <div class="ctl-center">
             <button id="btn-mic" class="round" title="Microfone"></button>
             <button id="btn-deaf" class="round" title="Silenciar vozes"></button>
             <button id="btn-cam" class="round" title="Câmera"></button>
             <button id="btn-screen" class="round" title="Transmitir tela"></button>
+            <button id="btn-clip" class="round" title="Salvar clipe" hidden></button>
+            <button id="btn-chat" class="round" title="Chat"><span id="chat-badge" class="badge-n" hidden></span></button>
             <button id="btn-leave" class="round hangup" title="Sair da sala"></button>
           </div>
           <div class="ctl-right">
@@ -65,6 +72,7 @@
           </div>
         </div>
       </div>
+      <aside id="chat-side" class="side chat" hidden></aside>
       <aside id="room-side" class="side">
         <div id="voice-box" class="voice"></div>
         <div id="turn-usage" class="muted" hidden></div>
@@ -77,6 +85,8 @@
           <div id="stream-note" class="warn" hidden></div>
           <h3>Assistindo <span id="viewer-count" class="pill">0</span></h3>
           <ul id="viewer-list"></ul>
+          <div id="cap-note" class="muted" hidden></div>
+          <button id="btn-pause" class="ghost">Pausar transmissão</button>
           <button id="btn-switch" class="ghost">Trocar tela/janela</button>
         </div>
       </aside>
@@ -97,6 +107,15 @@
         </div>
         <aside class="share-side">
           <h3>Qualidade</h3>
+          <label>Perfil
+            <select id="opt-profile">
+              <option value="game">Jogo 60 FPS</option>
+              <option value="balanced">Equilibrado</option>
+              <option value="eco">Economia (internet fraca)</option>
+              <option value="text">Texto nítido (código, planilhas)</option>
+              <option value="custom">Personalizado</option>
+            </select>
+          </label>
           <label>Resolução
             <select id="opt-res">
               <option value="720">720p</option>
@@ -168,9 +187,47 @@
           <label>Atalho: microfone <input id="set-hot-mic" readonly placeholder="clique e pressione" /></label>
           <label>Atalho: silenciar vozes <input id="set-hot-deaf" readonly placeholder="clique e pressione" /></label>
         </div>
-        <p class="muted">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho.</p>
+        <div class="row hot">
+          <label>Atalho: salvar clipe <input id="set-hot-clip" readonly placeholder="clique e pressione" /></label>
+          <label>Replay para clipes
+            <select id="set-clip-secs">
+              <option value="0">Desligado</option>
+              <option value="30">Últimos 30 s</option>
+              <option value="60">Último 1 min</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input id="set-clip-watched" type="checkbox" /> Clipar também as transmissões que eu assisto</label>
+        <p class="muted">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho. Os clipes vão para a pasta Vídeos/AriranhaCast; o replay fica só na memória e usa um pouco de CPU.</p>
+        <h3>TURN</h3>
+        <label class="check"><input id="set-relay-eco" type="checkbox" /> Modo econômico: reduzir a qualidade do vídeo quando a conexão passa pelo TURN</label>
+        <label>Franquia mensal do TURN em GB (0 = não avisar) <input id="set-turn-gb" type="number" min="0" max="10000" step="1" /></label>
+        <p class="muted">Quem estiver conectado pelo TURN pode falar, usar o chat e assistir, mas não pode transmitir a tela (é o que mais gasta a franquia).</p>
+        <h3>Overlay</h3>
+        <label class="check"><input id="set-ov-on" type="checkbox" /> Mostrar quem está falando por cima do jogo</label>
+        <div class="row hot">
+          <label>Canto
+            <select id="set-ov-corner">
+              <option value="tr">Superior direito</option>
+              <option value="tl">Superior esquerdo</option>
+              <option value="br">Inferior direito</option>
+              <option value="bl">Inferior esquerdo</option>
+            </select>
+          </label>
+          <label>Mostrar
+            <select id="set-ov-mode">
+              <option value="speaking">Só quem está falando</option>
+              <option value="all">Todos da sala</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted">O overlay aparece sobre jogos em janela ou "tela cheia sem bordas". Em tela cheia exclusiva o Windows não deixa nenhuma janela ficar por cima.</p>
+        <h3>Chat</h3>
+        <label>Chave do Giphy para procurar GIFs (opcional) <input id="set-giphy" maxlength="64" autocomplete="off" spellcheck="false" placeholder="grátis em developers.giphy.com" /></label>
+        <h3>Rede</h3>
         <div class="row">
           <button id="btn-netcheck" type="button" class="ghost">Testar minha rede</button>
+          <button id="btn-report" type="button" class="ghost">Copiar relatório de conexão</button>
         </div>
         <pre id="netcheck-out" class="netcheck" hidden></pre>
         <div class="row between">

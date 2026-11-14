@@ -1,4 +1,4 @@
-import { routeOf } from './link';
+import { routeOf, type Route } from './link';
 
 /**
  * Soma o tráfego deste PC que passou pelo servidor TURN. É uma estimativa do nosso
@@ -13,11 +13,11 @@ export class TurnMeter {
   private dirty = 0;
 
   /** Lê a rota da conexão e contabiliza o que trafegou por TURN desde a última leitura. */
-  async sample(pc: RTCPeerConnection): Promise<boolean> {
-    if (pc.connectionState !== 'connected') return false;
+  async sample(pc: RTCPeerConnection): Promise<Route | null> {
+    if (pc.connectionState !== 'connected') return null;
     const report = await pc.getStats().catch(() => null);
     const route = report && routeOf(report);
-    if (!route) return false;
+    if (!route) return null;
     const before = this.last.get(pc) ?? route.bytes; // a 1ª leitura só marca o ponto de partida
     this.last.set(pc, route.bytes);
     if (route.relay && route.bytes > before) {
@@ -26,7 +26,7 @@ export class TurnMeter {
       this.sessionBytes += delta;
       this.dirty += delta;
     }
-    return route.relay;
+    return route;
   }
 
   /** Grava o acumulado do mês (chamado de tempos em tempos, não a cada amostra). */

@@ -2,7 +2,7 @@ import type { DataConnection } from 'peerjs';
 import { pickCodec } from './codecs';
 import { Outgoing, type OutStats } from './link';
 import { iceServers } from './signaling';
-import type { EncodeOpts, Msg, Settings } from './types';
+import type { EncodeOpts, Msg, Quality, Settings } from './types';
 
 const HOST = 'host';
 const DEAD_AFTER_MS = 5000;
@@ -17,6 +17,7 @@ interface Viewer {
   bad: Set<string>; // relays que não conseguiram conexão com este espectador
   stats?: OutStats | null;
   deadSince?: number;
+  quality: Quality;
 }
 
 export interface ViewerRow {
@@ -24,6 +25,7 @@ export interface ViewerRow {
   name: string;
   via: string; // 'direto' ou nome do relay
   receiving: boolean;
+  quality: Quality;
   stats?: OutStats | null;
 }
 
@@ -59,6 +61,7 @@ export class Broadcast {
       parent: null,
       receiving: false,
       bad: new Set(),
+      quality: 'high',
     };
     const begin = () => {
       this.viewers.get(v.id)?.conn.close();
@@ -80,6 +83,12 @@ export class Broadcast {
     } else if (msg.t === 'status') {
       v.receiving = msg.receiving === true;
       this.onchange();
+    } else if (msg.t === 'quality') {
+      if (msg.q === 'high' || msg.q === 'med' || msg.q === 'low') {
+        v.quality = msg.q;
+        void v.out?.setQuality(msg.q);
+        this.onchange();
+      }
     } else if (msg.t === 'need-parent') {
       if (typeof msg.failed === 'string') v.bad.add(msg.failed.slice(0, 64));
       this.assign(v);
@@ -118,10 +127,20 @@ export class Broadcast {
     this.sendTo(v, { t: 'assign', parent, opts: this.opts, title: this.title });
     if (parent === HOST) {
       v.out = new Outgoing(this.stream, (m) => this.sendTo(v, m), this.opts, iceServers(this.settings), this.codecMime);
+      void v.out.setQuality(v.quality);
       v.out.onstate = (state) => {
         if (state === 'failed') this.onerror(`Sem rota de rede até ${v.name} (NAT restrito). Um servidor TURN resolve.`);
       };
     }
+  }
+
+  paused = false;
+
+  /** Pausa a imagem (os espectadores veem um aviso) sem encerrar a transmissão nem renegociar. */
+  setPaused(on: boolean): void {
+    this.paused = on;
+    for (const t of this.stream.getVideoTracks()) t.enabled = !on;
+    for (const v of this.viewers.values()) this.sendTo(v, { t: 'paused', on });
   }
 
   private remove(v: Viewer): void {
@@ -203,6 +222,7 @@ export class Broadcast {
       name: v.name,
       via: v.parent === HOST || !v.parent ? 'direto' : `via ${this.viewers.get(v.parent)?.name ?? 'relay'}`,
       receiving: v.receiving,
+      quality: v.quality,
       stats: v.stats,
     }));
   }

@@ -41,55 +41,93 @@ function gather(config: RTCConfiguration, ms = 5000): Promise<Cand[]> {
 
 const mask = (ip: string) => (ip.includes(':') ? ip.split(':').slice(0, 3).join(':') + ':…' : ip.split('.').slice(0, 2).join('.') + '.x.x');
 
-/**
- * Diagnóstico de rede: descobre se este PC consegue conexões diretas.
- * NAT simétrico = cada destino vê uma porta pública diferente, então o outro lado não
- * consegue "adivinhar" por onde entrar; é o caso típico de CGNAT e exige TURN.
- */
-export async function checkNetwork(): Promise<string> {
-  const lines: string[] = [];
-  const stun = await gather({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }],
-  });
-  const udp = stun.filter((c) => c.protocol === 'udp');
-  const v6 = udp.some((c) => c.type === 'host' && c.address.includes(':') && !/^f[cde]/i.test(c.address) && !c.address.startsWith('::1'));
-  const srflx = udp.filter((c) => c.type === 'srflx' && !c.address.includes(':'));
+export interface NetInfo {
+  publicIp: string; // mascarado
+  udp: boolean;
+  nat: 'aberto' | 'simétrico' | 'desconhecido';
+  v6Address: boolean; // tem endereço IPv6 global na placa
+  v6Works: boolean; // conseguiu de fato sair para a internet por IPv6
+  turn: 'ok' | 'falhou' | 'sem';
+}
 
-  let restricted = false;
-  if (!srflx.length) {
-    restricted = true;
-    lines.push('✗ Endereço público: não obtido. UDP parece bloqueado (firewall, VPN ou rede corporativa).');
-  } else {
-    lines.push(`✓ Endereço público: ${mask(srflx[0].address)}`);
+/** Teste real de IPv6: tenta alcançar endereços que só existem em IPv6. Ter o endereço na placa não basta. */
+async function probeV6(): Promise<boolean> {
+  const tryOne = async (url: string): Promise<boolean> => {
+    try {
+      await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(4000) });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const results = await Promise.all([tryOne('https://ipv6.google.com/generate_204'), tryOne('https://api6.ipify.org/')]);
+  return results.some(Boolean);
+}
+
+export async function probeNetwork(): Promise<NetInfo> {
+  const [stun, v6Works] = await Promise.all([
+    gather({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] }),
+    probeV6(),
+  ]);
+  const udp = stun.filter((c) => c.protocol === 'udp');
+  const v6Address = udp.some((c) => c.address.includes(':') && !/^f[cde]/i.test(c.address) && !c.address.startsWith('::1'));
+  const srflx = udp.filter((c) => c.type === 'srflx' && !c.address.includes(':'));
+  let nat: NetInfo['nat'] = 'desconhecido';
+  if (srflx.length) {
     // Mesma porta local vista com portas públicas diferentes por servidores diferentes?
     const byBase = new Map<string, Set<number>>();
     for (const c of srflx) {
       const base = `${c.relatedAddress}:${c.relatedPort}`;
       (byBase.get(base) ?? byBase.set(base, new Set()).get(base)!).add(c.port);
     }
-    restricted = [...byBase.values()].some((ports) => ports.size > 1);
+    nat = [...byBase.values()].some((ports) => ports.size > 1) ? 'simétrico' : 'aberto';
+  }
+  let turn: NetInfo['turn'] = 'sem';
+  if (hasTurn()) {
+    const relay = await gather({ iceServers: iceServers(), iceTransportPolicy: 'relay' });
+    turn = relay.some((c) => c.type === 'relay') ? 'ok' : 'falhou';
+  }
+  return { publicIp: srflx.length ? mask(srflx[0].address) : '', udp: srflx.length > 0, nat, v6Address, v6Works, turn };
+}
+
+/**
+ * Diagnóstico de rede: descobre se este PC consegue conexões diretas.
+ * NAT simétrico = cada destino vê uma porta pública diferente, então o outro lado não
+ * consegue "adivinhar" por onde entrar; é o caso típico de CGNAT e exige TURN (ou IPv6 nos dois lados).
+ */
+export function describeNetwork(n: NetInfo): string {
+  const lines: string[] = [];
+  const restricted = !n.udp || n.nat === 'simétrico';
+  if (!n.udp) lines.push('✗ Endereço público: não obtido. UDP parece bloqueado (firewall, VPN ou rede corporativa).');
+  else {
+    lines.push(`✓ Endereço público: ${n.publicIp}`);
     lines.push(
-      restricted
-        ? '✗ Tipo de NAT: simétrico (típico de CGNAT). Conexão direta só fecha se o outro lado tiver rede aberta.'
+      n.nat === 'simétrico'
+        ? '✗ Tipo de NAT: simétrico (típico de CGNAT). Por IPv4, conexão direta só fecha se o outro lado tiver rede aberta.'
         : '✓ Tipo de NAT: compatível com conexão direta.',
     );
   }
-  lines.push(v6 ? '✓ IPv6: disponível (ajuda quando o outro lado também tem).' : '– IPv6: não disponível.');
-
-  if (hasTurn()) {
-    const relay = await gather({ iceServers: iceServers(), iceTransportPolicy: 'relay' });
-    lines.push(relay.some((c) => c.type === 'relay') ? '✓ TURN: configurado e respondendo.' : '✗ TURN: configurado, mas não respondeu (credenciais ou endereço).');
-  } else {
-    lines.push('– TURN: não configurado.');
-  }
-
+  lines.push(
+    n.v6Works
+      ? '✓ IPv6: funcionando de verdade (testado). Se o outro lado também tiver, a conexão direta fecha mesmo com CGNAT.'
+      : n.v6Address
+        ? '✗ IPv6: o PC tem endereço, mas não saiu para a internet por ele (roteador/operadora bloqueando).'
+        : '– IPv6: não disponível nesta rede.',
+  );
+  lines.push(n.turn === 'ok' ? '✓ TURN: configurado e respondendo.' : n.turn === 'falhou' ? '✗ TURN: configurado, mas não respondeu (credenciais ou endereço).' : '– TURN: não configurado.');
   lines.push('');
   lines.push(
-    restricted
-      ? hasTurn()
-        ? 'Resultado: rede restrita, mas com TURN as conexões devem fechar.'
-        : 'Resultado: rede restrita. Sem TURN, só conecta com quem tiver rede aberta.'
-      : 'Resultado: esta rede aceita conexão direta. Se alguém não conecta, a restrição está do lado dele.',
+    !restricted
+      ? 'Resultado: esta rede aceita conexão direta. Se alguém não conecta, a restrição está do lado dele.'
+      : n.v6Works
+        ? 'Resultado: IPv4 restrito, mas o IPv6 funciona. Conecta direto com quem também tiver IPv6 ou rede aberta.'
+        : n.turn === 'ok'
+          ? 'Resultado: rede restrita; as conexões fecham pelo TURN (que consome a franquia).'
+          : 'Resultado: rede restrita e sem IPv6. Sem TURN, só conecta com quem tiver rede aberta. Vale pedir IPv6 ou IP público à operadora.',
   );
   return lines.join('\n');
+}
+
+export async function checkNetwork(): Promise<string> {
+  return describeNetwork(await probeNetwork());
 }

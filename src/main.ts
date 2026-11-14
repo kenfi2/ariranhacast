@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, session, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, session, shell, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -126,22 +126,186 @@ function startAudioCap(sourceId: unknown): Promise<{ ok: boolean; reason?: strin
 // Exige um modificador (ou tecla de função), para nunca "engolir" uma tecla comum do sistema.
 const ACCELERATOR = /^(?:(?:Ctrl|Alt|Shift|Super)\+){1,3}(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|Space|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|num[0-9])$|^F(?:[1-9]|1\d|2[0-4])$/;
 
-function setHotkeys(keys: unknown): { mic: boolean; deaf: boolean } {
+function setHotkeys(keys: unknown): { mic: boolean; deaf: boolean; clip: boolean } {
   globalShortcut.unregisterAll();
-  const result = { mic: false, deaf: false };
+  const result = { mic: false, deaf: false, clip: false };
   if (!keys || typeof keys !== 'object') return result;
-  const { mic, deaf } = keys as { mic?: unknown; deaf?: unknown };
-  const reg = (accel: unknown, which: 'mic' | 'deaf'): boolean => {
-    if (typeof accel !== 'string' || !ACCELERATOR.test(accel)) return false;
+  const { mic, deaf, clip } = keys as { mic?: unknown; deaf?: unknown; clip?: unknown };
+  const used = new Set<string>();
+  const reg = (accel: unknown, which: 'mic' | 'deaf' | 'clip'): boolean => {
+    if (typeof accel !== 'string' || !ACCELERATOR.test(accel) || used.has(accel)) return false;
     try {
-      return globalShortcut.register(accel, () => send('lc:hotkey', which));
+      const ok = globalShortcut.register(accel, () => send('lc:hotkey', which));
+      if (ok) used.add(accel);
+      return ok;
     } catch {
       return false;
     }
   };
   result.mic = reg(mic, 'mic');
-  if (deaf !== mic) result.deaf = reg(deaf, 'deaf');
+  result.deaf = reg(deaf, 'deaf');
+  result.clip = reg(clip, 'clip');
   return result;
+}
+
+
+// ---------- links, clipes, GIFs ----------
+/** Só abre links http(s) no navegador padrão (nunca file:, javascript:, etc.). */
+function openExternal(url: unknown): boolean {
+  if (typeof url !== 'string' || url.length > 2000) return false;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    void shell.openExternal(u.toString());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const clipDir = (): string => path.join(app.getPath('videos'), 'AriranhaCast');
+
+async function saveClip(data: unknown, ext: unknown): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const kind = ext === 'mp4' ? 'mp4' : 'webm';
+  const buf = data instanceof ArrayBuffer ? Buffer.from(data) : ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : null;
+  if (!buf || buf.length < 1000 || buf.length > 600 * 1024 * 1024) return { ok: false, error: 'clipe vazio ou grande demais' };
+  try {
+    fs.mkdirSync(clipDir(), { recursive: true });
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const name = `Clipe ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${kind}`;
+    const file = path.join(clipDir(), name);
+    fs.writeFileSync(file, buf);
+    return { ok: true, path: file };
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 120) };
+  }
+}
+
+const GIF_HOSTS = /^(?:media\d*|i)\.giphy\.com$/;
+
+async function gifSearch(key: unknown, query: unknown) {
+  if (typeof key !== 'string' || !/^[\w-]{16,64}$/.test(key)) return { ok: false, items: [], error: 'Falta a chave do Giphy (Configurações).' };
+  const q = typeof query === 'string' ? query.trim().slice(0, 80) : '';
+  const url = q
+    ? `https://api.giphy.com/v1/gifs/search?api_key=${key}&q=${encodeURIComponent(q)}&limit=18&rating=pg-13&lang=pt`
+    : `https://api.giphy.com/v1/gifs/trending?api_key=${key}&limit=18&rating=pg-13`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return { ok: false, items: [], error: res.status === 401 || res.status === 403 ? 'Chave do Giphy recusada.' : `Giphy respondeu ${res.status}.` };
+    const json = (await res.json()) as { data?: any[] };
+    const items = await Promise.all(
+      (json.data ?? []).slice(0, 18).map(async (g) => {
+        const thumb: string = g?.images?.fixed_width_small?.url ?? g?.images?.fixed_width?.url ?? '';
+        const full: string = g?.images?.fixed_height?.url ?? g?.images?.downsized?.url ?? '';
+        try {
+          if (!GIF_HOSTS.test(new URL(thumb).hostname) || !GIF_HOSTS.test(new URL(full).hostname)) return null;
+          const r = await fetch(thumb, { signal: AbortSignal.timeout(8000) });
+          const b = Buffer.from(await r.arrayBuffer());
+          if (!r.ok || b.length > 600_000) return null;
+          return { id: String(g.id).slice(0, 40), title: String(g.title ?? '').slice(0, 80), thumb: `data:image/gif;base64,${b.toString('base64')}`, url: full };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return { ok: true, items: items.filter(Boolean) };
+  } catch {
+    return { ok: false, items: [], error: 'Sem conexão com o Giphy.' };
+  }
+}
+
+async function gifFetch(url: unknown): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> {
+  try {
+    if (typeof url !== 'string') throw new Error('url');
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || !GIF_HOSTS.test(u.hostname)) throw new Error('host');
+    const r = await fetch(u, { signal: AbortSignal.timeout(15000) });
+    const b = Buffer.from(await r.arrayBuffer());
+    if (!r.ok || b.length > 4 * 1024 * 1024) throw new Error('size');
+    return { ok: true, data: b.buffer.slice(b.byteOffset, b.byteOffset + b.length) as ArrayBuffer };
+  } catch {
+    return { ok: false, error: 'Não consegui baixar o GIF.' };
+  }
+}
+
+// ---------- overlay "quem está falando" ----------
+type OverlayCfg = { enabled: boolean; corner: 'tl' | 'tr' | 'bl' | 'br'; mode: 'speaking' | 'all' };
+let overlay: BrowserWindow | null = null;
+let overlayCfg: OverlayCfg = { enabled: false, corner: 'tr', mode: 'speaking' };
+
+function placeOverlay(): void {
+  if (!overlay || overlay.isDestroyed()) return;
+  const wa = screen.getDisplayMatching(win?.getBounds() ?? screen.getPrimaryDisplay().bounds).workArea;
+  const w = 260;
+  const h = 360;
+  const x = overlayCfg.corner.endsWith('l') ? wa.x + 12 : wa.x + wa.width - w - 12;
+  const y = overlayCfg.corner.startsWith('t') ? wa.y + 12 : wa.y + wa.height - h - 12;
+  overlay.setBounds({ x, y, width: w, height: h });
+}
+
+function updateOverlay(): void {
+  const want = overlayCfg.enabled && inRoom;
+  if (!want) {
+    if (overlay && !overlay.isDestroyed()) overlay.close();
+    overlay = null;
+    return;
+  }
+  if (overlay && !overlay.isDestroyed()) {
+    placeOverlay();
+    overlay.webContents.send('lc:ov-config', overlayCfg);
+    return;
+  }
+  overlay = new BrowserWindow({
+    width: 260,
+    height: 360,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    alwaysOnTop: true,
+    webPreferences: { preload: path.join(__dirname, 'overlay-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: false },
+  });
+  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.setIgnoreMouseEvents(true);
+  overlay.setVisibleOnAllWorkspaces(true);
+  void overlay.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
+  overlay.webContents.once('did-finish-load', () => {
+    placeOverlay();
+    overlay?.webContents.send('lc:ov-config', overlayCfg);
+    overlay?.showInactive();
+  });
+  overlay.on('closed', () => (overlay = null));
+}
+
+function cleanOverlayCfg(v: unknown): OverlayCfg {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  return {
+    enabled: o.enabled === true,
+    corner: o.corner === 'tl' || o.corner === 'bl' || o.corner === 'br' ? o.corner : 'tr',
+    mode: o.mode === 'all' ? 'all' : 'speaking',
+  };
+}
+
+// ---------- convite (ariranhacast://entrar/CODIGO) ----------
+const CODE_RE = /^[A-Za-z0-9]{4,16}$/;
+let deepLink = '';
+function codeFromArgs(argv: string[]): string {
+  for (const a of argv) {
+    const m = /^ariranhacast:\/\/(?:entrar|join)\/([A-Za-z0-9]{4,16})\/?$/i.exec(a);
+    if (m) return m[1];
+  }
+  return '';
+}
+function takeDeepLink(code: string): void {
+  if (!CODE_RE.test(code)) return;
+  deepLink = code;
+  send('lc:deeplink', code);
+  showWindow();
 }
 
 // ---------- bandeja ----------
@@ -450,6 +614,19 @@ app.on('web-contents-created', (_e, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 });
 
+if (process.platform === 'win32') app.setAsDefaultProtocolClient('ariranhacast', process.execPath, process.defaultApp ? [path.resolve(process.argv[1] ?? '')] : []);
+deepLink = codeFromArgs(process.argv);
+if (!profile && !app.requestSingleInstanceLock()) {
+  // Já existe uma janela aberta: ela recebe o convite e esta cópia fecha.
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    const code = codeFromArgs(argv);
+    if (code) takeDeepLink(code);
+    else showWindow();
+  });
+}
+
 app.whenReady().then(() => {
   // Permissões: só o que o app usa (microfone/câmera, captura de tela, escolher saída de
   // áudio, tela cheia, copiar o código). Todo o resto é negado.
@@ -530,6 +707,37 @@ app.whenReady().then(() => {
     inRoom = on === true;
     micOn = mic === true;
     refreshTray();
+    updateOverlay();
+  });
+  handle('lc:open-external', (url: unknown) => openExternal(url));
+  handle('lc:save-clip', (data: unknown, ext: unknown) => saveClip(data, ext));
+  handle('lc:show-clip', (file: unknown) => {
+    if (typeof file === 'string' && path.dirname(path.resolve(file)) === path.resolve(clipDir())) shell.showItemInFolder(path.resolve(file));
+  });
+  handle('lc:flash', () => {
+    if (win && !win.isFocused()) win.flashFrame(true);
+  });
+  handle('lc:gif-search', (key: unknown, q: unknown) => gifSearch(key, q));
+  handle('lc:gif-fetch', (url: unknown) => gifFetch(url));
+  handle('lc:overlay-config', (cfg: unknown) => {
+    overlayCfg = cleanOverlayCfg(cfg);
+    updateOverlay();
+  });
+  handle('lc:deeplink-pending', () => {
+    const c = deepLink;
+    deepLink = '';
+    return c;
+  });
+  // O renderer envia as linhas do overlay (nomes e estado de fala) e o main repassa à janela do overlay.
+  ipcMain.on('lc:overlay-rows', (e, rows: unknown) => {
+    if (!trusted(e as unknown as IpcMainInvokeEvent) || !Array.isArray(rows) || !overlay || overlay.isDestroyed()) return;
+    const clean = rows.slice(0, 16).map((r) => ({
+      name: String(r?.name ?? '').replace(/[\p{Cc}\p{Cf}]/gu, '').slice(0, 24),
+      color: /^#[0-9a-f]{6}$/i.test(String(r?.color)) ? String(r.color) : '#7c8cff',
+      speaking: r?.speaking === true,
+      muted: r?.muted === true,
+    }));
+    overlay.webContents.send('lc:ov-rows', clean);
   });
 
   createTray();

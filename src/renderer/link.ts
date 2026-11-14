@@ -1,6 +1,6 @@
 import { preferCodec } from './codecs';
-import { icePolicy } from './signaling';
-import type { EncodeOpts, Msg } from './types';
+import { icePolicy, net } from './signaling';
+import type { EncodeOpts, Msg, Quality } from './types';
 
 type Send = (msg: Msg) => void;
 
@@ -30,8 +30,19 @@ function withStereoOpus(sdp: string): string {
     : sdp.replace(new RegExp(`(a=rtpmap:${pt} opus[^\\r\\n]*)`, 'i'), `$1\r\na=fmtp:${pt} ${extra}`);
 }
 
+export interface Route {
+  relay: boolean; // algum dos lados usa servidor TURN
+  localRelay: boolean; // este PC usa a própria alocação no TURN
+  bytes: number;
+  localType: string;
+  remoteType: string;
+  protocol: string;
+  family: 'IPv4' | 'IPv6' | '';
+  rttMs: number;
+}
+
 /** A conexão está passando por um servidor TURN? E quantos bytes já trafegaram por ela. */
-export function routeOf(report: RTCStatsReport): { relay: boolean; bytes: number } | null {
+export function routeOf(report: RTCStatsReport): Route | null {
   let pair: any;
   report.forEach((s: any) => {
     if (s.type === 'transport' && s.selectedCandidatePairId) pair = report.get(s.selectedCandidatePairId) ?? pair;
@@ -44,11 +55,64 @@ export function routeOf(report: RTCStatsReport): { relay: boolean; bytes: number
   if (!pair) return null;
   const local: any = report.get(pair.localCandidateId);
   const remote: any = report.get(pair.remoteCandidateId);
+  const addr: string = String(remote?.address ?? remote?.ip ?? '');
   return {
     relay: local?.candidateType === 'relay' || remote?.candidateType === 'relay',
+    localRelay: local?.candidateType === 'relay',
     bytes: (pair.bytesSent ?? 0) + (pair.bytesReceived ?? 0),
+    localType: String(local?.candidateType ?? ''),
+    remoteType: String(remote?.candidateType ?? ''),
+    protocol: String(local?.protocol ?? ''),
+    family: addr ? (addr.includes(':') ? 'IPv6' : 'IPv4') : '',
+    rttMs: Math.round((pair.currentRoundTripTime ?? 0) * 1000),
   };
 }
+
+export interface LinkQuality {
+  rttMs: number;
+  lossPct: number;
+  jitterMs: number;
+  level: 0 | 1 | 2 | 3; // 3 = ótima … 0 = ruim
+}
+
+const lastLoss = new WeakMap<RTCPeerConnection, { lost: number; recv: number }>();
+
+/** Ping, perda de pacotes e jitter de uma conexão de voz (perda medida entre duas leituras). */
+export async function measurePc(pc: RTCPeerConnection): Promise<LinkQuality | null> {
+  if (pc.connectionState !== 'connected') return null;
+  const report = await pc.getStats().catch(() => null);
+  if (!report) return null;
+  const route = routeOf(report);
+  let inb: any;
+  report.forEach((s: any) => {
+    if (s.type === 'inbound-rtp' && s.kind === 'audio') inb = s;
+  });
+  let lossPct = 0;
+  let jitterMs = 0;
+  if (inb) {
+    const prev = lastLoss.get(pc);
+    const lost = Math.max(0, inb.packetsLost ?? 0);
+    const recv = inb.packetsReceived ?? 0;
+    lastLoss.set(pc, { lost, recv });
+    if (prev) {
+      const dl = Math.max(0, lost - prev.lost);
+      const dr = Math.max(0, recv - prev.recv);
+      lossPct = dl + dr > 0 ? Math.round((dl / (dl + dr)) * 1000) / 10 : 0;
+    }
+    jitterMs = Math.round((inb.jitter ?? 0) * 1000);
+  }
+  const rttMs = route?.rttMs ?? 0;
+  const level = rttMs < 70 && lossPct < 1 ? 3 : rttMs < 140 && lossPct < 3 ? 2 : rttMs < 280 && lossPct < 8 ? 1 : 0;
+  return { rttMs, lossPct, jitterMs, level };
+}
+
+/** Limites de qualidade por espectador e por rota (TURN). */
+const QUALITY_CAPS: Record<Quality, { br: number; fps: number; scale: number }> = {
+  high: { br: Infinity, fps: Infinity, scale: 1 },
+  med: { br: 3_000_000, fps: 60, scale: 1.5 },
+  low: { br: 1_000_000, fps: 30, scale: 2 },
+};
+const RELAY_CAP = { br: 2_500_000, fps: 30, scale: 1.5 };
 
 export interface OutStats {
   kbps: number;
@@ -62,6 +126,7 @@ export interface OutStats {
   rttMs: number;
   lossPct: number;
   turn: boolean;
+  capped: string; // '' ou o motivo de a qualidade estar reduzida (TURN, escolha do espectador)
 }
 
 export interface InStats {
@@ -85,6 +150,8 @@ export class Outgoing {
   private remoteSet = false;
   private lastBytes = 0;
   private lastTime = 0;
+  private quality: Quality = 'high';
+  private relayed = false;
   onstate: (state: RTCPeerConnectionState) => void = () => {};
 
   constructor(
@@ -146,12 +213,42 @@ export class Outgoing {
       const p = sender.getParameters();
       if (!p.encodings?.length) continue;
       p.degradationPreference = opts.mode === 'motion' ? 'maintain-framerate' : 'maintain-resolution';
-      p.encodings[0].maxBitrate = opts.maxBitrate;
-      p.encodings[0].maxFramerate = opts.maxFps;
+      const cap = this.cap();
+      p.encodings[0].maxBitrate = Math.min(opts.maxBitrate, cap.br);
+      p.encodings[0].maxFramerate = Math.min(opts.maxFps, cap.fps);
+      p.encodings[0].scaleResolutionDownBy = cap.scale;
       p.encodings[0].priority = 'high';
       p.encodings[0].networkPriority = 'high';
       await sender.setParameters(p).catch((e) => console.warn('[LC] setParameters', e));
     }
+  }
+
+  /** Limite em vigor: o mais restritivo entre a escolha do espectador e a economia no TURN. */
+  private cap(): { br: number; fps: number; scale: number } {
+    const q = QUALITY_CAPS[this.quality];
+    if (!this.relayed || !net.relayEconomy) return q;
+    return { br: Math.min(q.br, RELAY_CAP.br), fps: Math.min(q.fps, RELAY_CAP.fps), scale: Math.max(q.scale, RELAY_CAP.scale) };
+  }
+
+  /** Motivo da qualidade reduzida, para exibir a quem transmite. */
+  get capReason(): string {
+    const parts: string[] = [];
+    if (this.quality !== 'high') parts.push(`espectador pediu qualidade ${this.quality === 'med' ? 'média' : 'baixa'}`);
+    if (this.relayed && net.relayEconomy) parts.push('economia no TURN');
+    return parts.join(' + ');
+  }
+
+  /** O espectador escolheu uma qualidade menor (ou voltou à máxima). */
+  async setQuality(q: Quality): Promise<void> {
+    if (q === this.quality) return;
+    this.quality = q;
+    if (this.remoteSet) await this.applyParams();
+  }
+
+  private async setRelayed(on: boolean): Promise<void> {
+    if (on === this.relayed) return;
+    this.relayed = on;
+    if (this.remoteSet) await this.applyParams();
   }
 
   /** Troca as faixas sem renegociar (trocar de janela, ou relay que mudou de origem). */
@@ -171,6 +268,7 @@ export class Outgoing {
       if (s.type === 'remote-inbound-rtp' && s.kind === 'video') remote = s;
     });
     if (!out) return null;
+    void this.setRelayed(!!routeOf(report)?.relay);
     const codec: any = out.codecId ? report.get(out.codecId) : null;
     const dt = (out.timestamp - this.lastTime) / 1000;
     const kbps = this.lastTime && dt > 0 ? ((out.bytesSent - this.lastBytes) * 8) / dt / 1000 : 0;
@@ -188,6 +286,7 @@ export class Outgoing {
       rttMs: Math.round((remote?.roundTripTime ?? 0) * 1000),
       lossPct: Math.round((remote?.fractionLost ?? 0) * 1000) / 10,
       turn: !!routeOf(report)?.relay,
+      capped: this.capReason,
     };
   }
 

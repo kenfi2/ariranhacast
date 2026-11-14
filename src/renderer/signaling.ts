@@ -78,6 +78,9 @@ export function hasTurn(): boolean {
   return [...ownIce, ...roomIce].some((s) => [s.urls].flat().some((u) => /^turns?:/i.test(String(u))));
 }
 
+/** Preferências de rede ajustáveis em Configurações (lidas por quem envia vídeo). */
+export const net = { relayEconomy: true };
+
 /** Só para testes: força todo o tráfego pelo TURN, simulando uma rede que não fecha conexão direta. */
 export const relayOnly = new URLSearchParams(location.search).has('relayonly');
 export const icePolicy: RTCIceTransportPolicy = relayOnly ? 'relay' : 'all';

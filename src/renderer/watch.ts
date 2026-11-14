@@ -3,7 +3,7 @@ import type { DataConnection } from 'peerjs';
 import { pickCodec } from './codecs';
 import { Incoming, Outgoing, type InStats } from './link';
 import { iceServers } from './signaling';
-import type { EncodeOpts, Msg, Settings } from './types';
+import type { EncodeOpts, Msg, Quality, Settings } from './types';
 
 const HOST = 'host';
 const LINK_TIMEOUT_MS = 12000;
@@ -24,6 +24,14 @@ export class Watch {
 
   onstream: (stream: MediaStream) => void = () => {};
   onstatus: (text: string) => void = () => {};
+  onpaused: (on: boolean) => void = () => {};
+  quality: Quality = 'high';
+
+  /** Pede ao anfitrião da transmissão uma qualidade menor para este espectador (só vale se ele recebe direto). */
+  setQuality(q: Quality): void {
+    this.quality = q;
+    if (this.control?.open) this.control.send({ t: 'quality', q } satisfies Msg);
+  }
   onend: (reason: string) => void = () => {};
 
   constructor(
@@ -53,7 +61,9 @@ export class Watch {
 
   private onControl(msg: Msg): void {
     if (!msg || typeof msg !== 'object') return;
-    if (msg.t === 'assign') {
+    if (msg.t === 'paused') {
+      this.onpaused(msg.on === true);
+    } else if (msg.t === 'assign') {
       if (typeof msg.parent !== 'string' || !msg.opts || typeof msg.opts !== 'object') return;
       // Parâmetros vindos da rede: limitados a faixas razoáveis antes de usar.
       this.opts = {

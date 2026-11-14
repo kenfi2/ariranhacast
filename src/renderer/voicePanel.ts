@@ -105,6 +105,19 @@ export function mountVoicePanel(container: HTMLElement, voice: Voice, onupdate: 
       }
       li.querySelector('.who')!.textContent =
         r.name + (r.self && !voice.micOn ? ' · mudo' : '') + (!r.connected ? ' · conectando…' : r.self ? '' : r.turn ? ' · via TURN' : ' · direto');
+      let sig = li.querySelector<HTMLElement>('.sig');
+      if (!sig) {
+        sig = document.createElement('span');
+        sig.className = 'sig';
+        li.querySelector('.who')!.after(sig);
+      }
+      const q = r.link;
+      sig.hidden = !q;
+      if (q) {
+        sig.dataset.level = String(q.level);
+        sig.textContent = `${q.rttMs} ms`;
+        sig.title = `Ping ${q.rttMs} ms · perda ${q.lossPct}% · jitter ${q.jitterMs} ms`;
+      }
       li.querySelector('.dot')!.className = 'dot' + (r.speaking ? ' speaking' : r.connected ? ' on' : '');
       li.classList.toggle('speaking', r.speaking);
     }

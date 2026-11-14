@@ -1,3 +1,4 @@
+import type { LinkQuality } from './link';
 import type Peer from 'peerjs';
 import type { MediaConnection } from 'peerjs';
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor';
@@ -23,6 +24,7 @@ export interface VoiceRow {
   speaking: boolean;
   volume: number;
   turn: boolean; // a conexão com este participante passa pelo TURN
+  link?: LinkQuality;
 }
 
 interface Remote {
@@ -98,6 +100,7 @@ export class Voice {
   private closed = false;
   /** ids cuja conexão de voz passa pelo TURN (atualizado pelo app a partir das estatísticas). */
   turnIds = new Set<string>();
+  links = new Map<string, LinkQuality>(); // ping/perda por pessoa (preenchido pelo app)
   onchange: () => void = () => {};
 
   constructor(
@@ -363,7 +366,7 @@ export class Voice {
     ];
     for (const [id, r] of this.remotes) {
       const connected = r.call?.peerConnection?.connectionState === 'connected';
-      rows.push({ id, name: r.name, self: false, connected, speaking: r.speaking, volume: r.volume, turn: connected && this.turnIds.has(id) });
+      rows.push({ id, name: r.name, self: false, connected, speaking: r.speaking, volume: r.volume, turn: connected && this.turnIds.has(id), link: connected ? this.links.get(id) : undefined });
     }
     return rows;
   }

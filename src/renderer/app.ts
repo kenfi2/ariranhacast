@@ -2,9 +2,12 @@ import { Broadcast } from './broadcast';
 import { Cams } from './cams';
 import { availableCodecs } from './codecs';
 import { PROTO, Room } from './room';
-import { checkNetwork } from './netcheck';
-import { hasTurn, loadIce, normalizeCode } from './signaling';
-import type { CodecChoice, EncodeOpts, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
+import { mountChat } from './chatui';
+import { ClipBuffer } from './clips';
+import { measurePc, type Route } from './link';
+import { describeNetwork, probeNetwork, type NetInfo } from './netcheck';
+import { hasTurn, loadIce, net, normalizeCode } from './signaling';
+import type { CodecChoice, EncodeOpts, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
 import { mountVoicePanel } from './voicePanel';
 import { formatBytes, TurnMeter } from './turnmeter';
@@ -30,6 +33,8 @@ const ICON = {
   headset: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="13" width="4.5" height="7" rx="1.6"/><rect x="16.5" y="13" width="4.5" height="7" rx="1.6"/>',
   cam: '<rect x="2.5" y="6" width="12.5" height="12" rx="2.5"/><path d="M15 10.5l6.5-3.5v10L15 13.5z"/>',
   screen: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/>',
+  chat: '<path d="M4 5.5h16v10.5H10l-4.5 3.5v-3.5H4z"/>',
+  clip: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/>',
   hangup: '<path d="M3.5 14.2c4.8-4.6 12.2-4.6 17 0l-2.3 2.4-3.2-1.5v-2.6c-1.9-.6-4.1-.6-6 0v2.6l-3.2 1.5z"/>',
 };
 
@@ -47,9 +52,23 @@ function loadSettings(): Settings {
     iceServers: params.get('ice') ?? saved.iceServers ?? '',
     hotMic: typeof saved.hotMic === 'string' ? saved.hotMic : 'Ctrl+Shift+M',
     hotDeaf: typeof saved.hotDeaf === 'string' ? saved.hotDeaf : 'Ctrl+Shift+D',
+    hotClip: typeof saved.hotClip === 'string' ? saved.hotClip : 'Ctrl+Shift+C',
+    giphyKey: typeof saved.giphyKey === 'string' ? saved.giphyKey : '',
+    relayEconomy: saved.relayEconomy !== false,
+    turnLimitGb: Number.isFinite(saved.turnLimitGb) ? Math.max(0, Number(saved.turnLimitGb)) : 20,
+    overlayOn: saved.overlayOn !== false,
+    overlayCorner: saved.overlayCorner === 'tl' || saved.overlayCorner === 'bl' || saved.overlayCorner === 'br' ? saved.overlayCorner : 'tr',
+    overlayMode: saved.overlayMode === 'all' ? 'all' : 'speaking',
+    clipSeconds: saved.clipSeconds === 0 || saved.clipSeconds === 60 ? saved.clipSeconds : 30,
+    clipWatched: saved.clipWatched !== false,
   };
 }
 let settings = loadSettings();
+function applySettings(): void {
+  net.relayEconomy = settings.relayEconomy;
+  void window.ariranhacast.setOverlay({ enabled: settings.overlayOn, corner: settings.overlayCorner, mode: settings.overlayMode });
+}
+applySettings();
 let appVersion = '';
 void window.ariranhacast.appVersion().then((v) => {
   appVersion = v;
@@ -145,6 +164,15 @@ $('btn-settings').onclick = () => {
   $<HTMLTextAreaElement>('set-ice').value = settings.iceServers;
   $<HTMLInputElement>('set-hot-mic').value = settings.hotMic;
   $<HTMLInputElement>('set-hot-deaf').value = settings.hotDeaf;
+  $<HTMLInputElement>('set-hot-clip').value = settings.hotClip;
+  $<HTMLSelectElement>('set-clip-secs').value = String(settings.clipSeconds);
+  $<HTMLInputElement>('set-clip-watched').checked = settings.clipWatched;
+  $<HTMLInputElement>('set-relay-eco').checked = settings.relayEconomy;
+  $<HTMLInputElement>('set-turn-gb').value = String(settings.turnLimitGb);
+  $<HTMLInputElement>('set-ov-on').checked = settings.overlayOn;
+  $<HTMLSelectElement>('set-ov-corner').value = settings.overlayCorner;
+  $<HTMLSelectElement>('set-ov-mode').value = settings.overlayMode;
+  $<HTMLInputElement>('set-giphy').value = settings.giphyKey;
   void refreshFirewall();
   $<HTMLDialogElement>('dlg-settings').showModal();
 };
@@ -187,13 +215,27 @@ $<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
     iceServers: ice,
     hotMic: $<HTMLInputElement>('set-hot-mic').value,
     hotDeaf: $<HTMLInputElement>('set-hot-deaf').value,
+    hotClip: $<HTMLInputElement>('set-hot-clip').value,
+    giphyKey: $<HTMLInputElement>('set-giphy').value.trim(),
+    relayEconomy: $<HTMLInputElement>('set-relay-eco').checked,
+    turnLimitGb: Math.max(0, Number($<HTMLInputElement>('set-turn-gb').value) || 0),
+    overlayOn: $<HTMLInputElement>('set-ov-on').checked,
+    overlayCorner: $<HTMLSelectElement>('set-ov-corner').value as Settings['overlayCorner'],
+    overlayMode: $<HTMLSelectElement>('set-ov-mode').value as Settings['overlayMode'],
+    clipSeconds: Number($<HTMLSelectElement>('set-clip-secs').value) as Settings['clipSeconds'],
+    clipWatched: $<HTMLInputElement>('set-clip-watched').checked,
   };
   localStorage.setItem('ariranhacast.settings', JSON.stringify(settings));
-  if (room) void applyHotkeys();
+  applySettings();
+  if (room) {
+    void applyHotkeys();
+    syncClipTarget();
+    updateControls();
+  }
 });
 
 // Campos de atalho: clique e pressione a combinação. Backspace limpa.
-for (const id of ['set-hot-mic', 'set-hot-deaf']) {
+for (const id of ['set-hot-mic', 'set-hot-deaf', 'set-hot-clip']) {
   const input = $<HTMLInputElement>(id);
   input.onkeydown = (e) => {
     e.preventDefault();
@@ -208,8 +250,8 @@ for (const id of ['set-hot-mic', 'set-hot-deaf']) {
 }
 
 async function applyHotkeys(): Promise<void> {
-  const r = await window.ariranhacast.setHotkeys({ mic: settings.hotMic, deaf: settings.hotDeaf });
-  const failed = [settings.hotMic && !r.mic && settings.hotMic, settings.hotDeaf && !r.deaf && settings.hotDeaf].filter(Boolean);
+  const r = await window.ariranhacast.setHotkeys({ mic: settings.hotMic, deaf: settings.hotDeaf, clip: settings.clipSeconds ? settings.hotClip : '' });
+  const failed = [settings.hotMic && !r.mic && settings.hotMic, settings.hotDeaf && !r.deaf && settings.hotDeaf, settings.clipSeconds && settings.hotClip && !r.clip && settings.hotClip].filter(Boolean);
   if (failed.length) toast(`Atalho indisponível (já usado por outro programa): ${failed.join(', ')}`);
 }
 
@@ -234,6 +276,7 @@ function cue(on: boolean): void {
 window.ariranhacast.onHotkey(async (which) => {
   if (!room || !voice) return;
   if (which === 'leave') return leaveRoom();
+  if (which === 'clip') return void saveClip();
   if (which === 'mic') {
     await voice.setMic(!voice.micOn);
     cue(voice.micOn);
@@ -253,11 +296,14 @@ $('btn-netcheck').onclick = async () => {
   const draft: Settings = { ...settings, iceServers: $<HTMLTextAreaElement>('set-ice').value.trim() };
   // Dentro de uma sala, testa com o TURN em uso (recarregar descartaria o que a sala repassou).
   const ice = room ? { ok: true as const, error: '' } : await loadIce(draft);
-  const result = await checkNetwork();
+  lastNet = await probeNetwork();
+  const result = describeNetwork(lastNet);
   out.textContent = (ice.ok ? '' : `✗ TURN: não foi possível ler a configuração (${ice.error}).\n`) + result;
   btn.disabled = false;
   if (testing || params.has('netcheck')) log('netcheck', out.textContent.replace(/\n/g, ' | '));
 };
+
+let lastNet: NetInfo | null = null;
 
 function show(view: 'home' | 'room'): void {
   $('view-home').hidden = view !== 'home';
@@ -267,6 +313,7 @@ function show(view: 'home' | 'room'): void {
 let toastTimer = 0;
 function toast(text: string): void {
   const t = $('toast');
+  if (testing) log('toast', text);
   t.textContent = text;
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -281,6 +328,7 @@ interface Watching {
   volume: number;
   statsOn: boolean;
   statsText: string;
+  paused: boolean;
 }
 
 let room: Room | null = null;
@@ -295,6 +343,13 @@ const turnMeter = new TurnMeter();
 let focusKey = '';
 let pollTimer = 0;
 let busy = false;
+let chat: { destroy(): void; opened(): void } | null = null;
+let clipBuf: ClipBuffer | null = null;
+const routes = new Map<string, Route>(); // rota da conexão de voz com cada pessoa
+let allRelayStreak = 0; // leituras seguidas em que todas as conexões passam pelo TURN
+/** Este PC só alcança a sala pelo TURN: pode falar e assistir, mas não transmitir a tela. */
+// Numa conexão pelo TURN os dois lados aparecem como "relay"; quem tem a rede restrita é quem fica bloqueado.
+const viaTurnOnly = (): boolean => allRelayStreak >= 2 && lastNet?.nat !== 'aberto';
 
 // Tentativa de entrar/criar em andamento: mostra o progresso e permite cancelar.
 interface Attempt {
@@ -384,6 +439,7 @@ async function enterRoom(create: boolean, code?: string, password = ''): Promise
     updateSpeaking();
     updateControls();
   });
+  if (testing) window.setInterval(() => log('chatlog', settings.name, r.chatLog.map((m) => `${m.name}:${m.text.slice(0, 20)}:${m.img ? m.img.mime + '/' + m.img.data.byteLength : '-'}`).join(' ; '), `emotes=${[...r.emotes.keys()].join(',')}`, `dom=${document.querySelectorAll('.chat-msg').length}/${document.querySelectorAll('.chat-img').length}/${document.querySelectorAll('img.emote').length}`), 4000);
   r.onroster = onRoster;
   r.onend = (reason) => leaveRoom(reason);
   r.onstatus = (text) => {
@@ -403,6 +459,20 @@ async function enterRoom(create: boolean, code?: string, password = ''): Promise
     if (w) void w.watch.serveChild(conn);
     else conn.close();
   };
+  chat = mountChat($('chat-side'), {
+    room: r,
+    color,
+    toast,
+    giphyKey: () => settings.giphyKey,
+    isOpen: () => !$('chat-side').hidden,
+    onUnread: (n) => {
+      $('chat-badge').hidden = !n;
+      $('chat-badge').textContent = n > 99 ? '99+' : String(n);
+    },
+  });
+  $('chat-side').hidden = false;
+  if (!lastNet) void probeNetwork().then((n) => (lastNet ??= n)).catch(() => {});
+  rememberRoom(r.code);
   $('room-code').textContent = r.code;
   show('room');
   onRoster(r.roster);
@@ -421,6 +491,14 @@ function leaveRoom(reason?: string): void {
   for (const id of [...watches.keys()]) stopWatch(id);
   void window.ariranhacast.setHotkeys(null);
   turnMeter.flush();
+  chat?.destroy();
+  chat = null;
+  $('chat-badge').hidden = true;
+  clipBuf?.close();
+  clipBuf = null;
+  routes.clear();
+  allRelayStreak = 0;
+  lastOverlay = '';
   unmountVoice();
   unmountVoice = () => {};
   voice?.close();
@@ -434,6 +512,7 @@ function leaveRoom(reason?: string): void {
   tiles.clear();
   if (document.fullscreenElement) void document.exitFullscreen();
   show('home');
+  renderRecent();
   updateControls();
   if (reason) toast(reason);
   log('room left', reason ?? '');
@@ -467,6 +546,8 @@ $('btn-copy').onclick = async () => {
   await navigator.clipboard.writeText(room?.code ?? '');
   toast('Código copiado.');
 };
+$('room-code').title = 'Clique para copiar o código';
+$('room-code').onclick = () => $('btn-copy').click();
 $('btn-panel').onclick = () => ($('room-side').hidden = !$('room-side').hidden);
 
 // ---------- barra de controles ----------
@@ -494,6 +575,15 @@ function updateControls(): void {
   screen.classList.toggle('active', !!broadcast);
   screen.title = broadcast ? 'Parar de transmitir' : 'Transmitir tela';
 
+  const chatBtn = $('btn-chat');
+  if (!chatBtn.querySelector('svg')) chatBtn.insertAdjacentHTML('afterbegin', svg(ICON.chat));
+  chatBtn.classList.toggle('active', !$('chat-side').hidden);
+  const clip = $('btn-clip');
+  clip.innerHTML = svg(ICON.clip);
+  clip.hidden = !settings.clipSeconds;
+  clip.classList.toggle('dim', !clipBuf);
+  clip.title = clipBuf ? `Salvar clipe dos últimos ${settings.clipSeconds}–${settings.clipSeconds * 2} s${settings.hotClip ? ` (${settings.hotClip})` : ''}` : 'Clipes: transmita ou assista a uma transmissão para ter o que salvar';
+  $('btn-pause').textContent = broadcast?.paused ? 'Retomar transmissão' : 'Pausar transmissão';
   $('btn-leave').innerHTML = svg(ICON.hangup);
   void window.ariranhacast.setInRoom(!!room, micOn);
 }
@@ -517,8 +607,81 @@ $('btn-cam').onclick = async () => {
 };
 $('btn-screen').onclick = () => {
   if (broadcast) stopShare();
+  else if (viaTurnOnly()) toast('Sua conexão com a sala está passando pelo TURN, então a transmissão de tela fica bloqueada para não gastar a franquia. Voz, chat e assistir continuam funcionando.');
   else openShare(false);
 };
+$('btn-chat').onclick = () => {
+  const side = $('chat-side');
+  side.hidden = !side.hidden;
+  if (!side.hidden) chat?.opened();
+  updateControls();
+};
+$('btn-clip').onclick = () => void saveClip();
+$('btn-pause').onclick = () => {
+  if (!broadcast) return;
+  broadcast.setPaused(!broadcast.paused);
+  updateControls();
+  renderTiles();
+};
+$('btn-invite').onclick = async () => {
+  if (!room) return;
+  await navigator.clipboard.writeText(`Entra na minha sala do AriranhaCast!\nCódigo: ${room.code}\nLink (com o app instalado): ariranhacast://entrar/${room.code}\nBaixar o app: https://github.com/kenfi2/ariranhacast/releases/latest`);
+  toast('Convite copiado. É só colar no WhatsApp/Discord.' + (room.hasPassword ? ' A senha não vai junto: passe por fora.' : ''));
+};
+
+// ---------- salas recentes e convite por link ----------
+interface Recent {
+  code: string;
+  at: number;
+}
+function loadRecent(): Recent[] {
+  try {
+    const list = JSON.parse(localStorage.getItem('ariranhacast.recent') ?? '[]');
+    return Array.isArray(list) ? list.filter((r) => typeof r?.code === 'string' && /^[A-Z0-9]{4,16}$/.test(r.code)).slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+function rememberRoom(code: string): void {
+  const list = [{ code, at: Date.now() }, ...loadRecent().filter((r) => r.code !== code)].slice(0, 5);
+  localStorage.setItem('ariranhacast.recent', JSON.stringify(list));
+}
+function ago(ts: number): string {
+  const min = Math.round((Date.now() - ts) / 60000);
+  return min < 2 ? 'agora há pouco' : min < 60 ? `há ${min} min` : min < 60 * 24 ? `há ${Math.round(min / 60)} h` : `há ${Math.round(min / 1440)} d`;
+}
+function renderRecent(): void {
+  const list = loadRecent();
+  $('recent').hidden = !list.length;
+  $('recent-list').replaceChildren(
+    ...list.map((r) => {
+      const li = el('li');
+      const code = el('span', 'code', r.code);
+      code.title = 'Preencher o código';
+      code.onclick = () => ($<HTMLInputElement>('join-code').value = r.code);
+      const join = el('button', 'ghost small', 'Entrar');
+      join.type = 'button';
+      join.onclick = () => void enterRoom(false, r.code, $<HTMLInputElement>('join-pass').value);
+      const reopen = el('button', 'ghost small', 'Recriar');
+      reopen.type = 'button';
+      reopen.title = 'Abrir de novo uma sala com este mesmo código (se ninguém estiver nela)';
+      reopen.onclick = () => void enterRoom(true, r.code, $<HTMLInputElement>('create-pass').value);
+      li.append(code, el('span', 'when', ago(r.at)), join, reopen);
+      return li;
+    }),
+  );
+}
+renderRecent();
+
+function openInvite(code: string): void {
+  code = normalizeCode(code);
+  if (code.length < 4) return;
+  if (room) return toast(room.code === code ? 'Você já está nessa sala.' : `Convite para a sala ${code}: saia da sala atual para entrar.`);
+  $<HTMLInputElement>('join-code').value = code;
+  void enterRoom(false, code, $<HTMLInputElement>('join-pass').value);
+}
+window.ariranhacast.onDeepLink(openInvite);
+if (!testing) void window.ariranhacast.pendingDeepLink().then((c) => c && openInvite(c));
 
 // ---------- grade de participantes ----------
 interface Tile {
@@ -644,8 +807,18 @@ function renderTiles(): void {
           w!.volume = Number(vol.value);
           st.video.volume = w!.volume;
         };
+        const q = el('select', 'q');
+        q.title = 'Qualidade que você recebe (menor = gasta menos internet)';
+        for (const [v, label] of [['high', 'Qualidade máxima'], ['med', 'Média'], ['low', 'Baixa']] as const) q.add(new Option(label, v));
+        q.value = w!.watch.quality;
+        q.onclick = (e) => e.stopPropagation();
+        q.onchange = () => {
+          w!.watch.setQuality(q.value as Quality);
+          if (w!.watch.via !== 'direto') toast('Você recebe esta transmissão por outra pessoa da sala (relay); a qualidade segue a dela.');
+        };
         st.tools.append(
           vol,
+          q,
           toolButton('Estatísticas', () => {
             w!.statsOn = !w!.statsOn;
             st.stats.hidden = !w!.statsOn;
@@ -661,7 +834,9 @@ function renderTiles(): void {
     }
     if (mode === 'mine') {
       setVideo(st, localScreen ?? undefined, true);
-      st.body.hidden = true;
+      st.body.hidden = !broadcast?.paused;
+      if (broadcast?.paused && !st.body.childElementCount) st.body.append(el('strong', '', 'Transmissão pausada'));
+      if (!broadcast?.paused) st.body.replaceChildren();
     } else if (mode === 'watching') {
       setVideo(st, w!.stream, false);
       st.video.volume = w!.volume;
@@ -671,8 +846,9 @@ function renderTiles(): void {
         void (st.video as any).setSinkId?.(sink).catch(() => {});
       }
       const status = st.body.querySelector('.status');
-      if (status) status.textContent = w!.status;
-      st.body.hidden = !!w!.stream && !w!.status;
+      const shown = w!.status || (w!.paused ? `${p.name} pausou a transmissão` : '');
+      if (status) status.textContent = shown;
+      st.body.hidden = !!w!.stream && !shown;
       st.stats.textContent = w!.statsText;
     } else {
       setVideo(st, undefined, true);
@@ -704,6 +880,21 @@ function updateSpeaking(): void {
     const on = speaking.has(p.id === room.selfId ? 'self' : p.id);
     tiles.get(`user:${p.id}`)?.root.classList.toggle('speaking', on);
   }
+  pushOverlay();
+}
+
+let lastOverlay = '';
+function pushOverlay(): void {
+  if (!room || !voice || !settings.overlayOn) return;
+  const speaking = voice.speakingIds();
+  const rows: OverlayRow[] = room.roster.map((p) => {
+    const self = p.id === room!.selfId;
+    return { name: p.name, color: color(p.id), speaking: speaking.has(self ? 'self' : p.id), muted: self && !voice!.micOn };
+  });
+  const key = JSON.stringify(rows);
+  if (key === lastOverlay) return;
+  lastOverlay = key;
+  window.ariranhacast.pushOverlay(rows);
 }
 
 document.addEventListener('fullscreenchange', () => document.body.classList.toggle('fullscreen', !!document.fullscreenElement));
@@ -714,7 +905,7 @@ function startWatch(id: string): void {
   const r = room;
   wantWatch.set(id, Date.now());
   const watch = new Watch(room.peer, settings, id, (peerId) => r.isMember(peerId));
-  const w: Watching = { watch, status: '', volume: 1, statsOn: false, statsText: '' };
+  const w: Watching = { watch, status: '', volume: 1, statsOn: false, statsText: '', paused: false };
   watches.set(id, w);
   watch.onstatus = (t) => {
     w.status = t;
@@ -723,6 +914,11 @@ function startWatch(id: string): void {
   };
   watch.onstream = (stream) => {
     w.stream = stream;
+    renderTiles();
+    syncClipTarget();
+  };
+  watch.onpaused = (on) => {
+    w.paused = on;
     renderTiles();
   };
   watch.onend = (reason) => {
@@ -751,6 +947,7 @@ function stopWatch(id: string): void {
   watches.delete(id);
   w.watch.close();
   renderTiles();
+  syncClipTarget();
 }
 
 // ---------- transmitir a tela ----------
@@ -797,6 +994,47 @@ function openShare(isSwitch: boolean): void {
 $('btn-refresh').onclick = () => void refreshSources();
 $('btn-share-cancel').onclick = () => $<HTMLDialogElement>('dlg-share').close();
 $('btn-switch').onclick = () => openShare(true);
+
+// Perfis prontos: preenchem as opções; mexer em qualquer uma vira "Personalizado".
+const PROFILES: Record<string, { res: string; fps: string; bitrate: string; mode: string }> = {
+  game: { res: '1080', fps: '60', bitrate: '0', mode: 'motion' },
+  balanced: { res: '1080', fps: '30', bitrate: '0', mode: 'motion' },
+  eco: { res: '720', fps: '30', bitrate: '3000', mode: 'motion' },
+  text: { res: '0', fps: '30', bitrate: '6000', mode: 'detail' },
+};
+function applyProfile(name: string): void {
+  const p = PROFILES[name];
+  if (!p) return;
+  $<HTMLSelectElement>('opt-res').value = p.res;
+  $<HTMLSelectElement>('opt-fps').value = p.fps;
+  $<HTMLSelectElement>('opt-bitrate').value = p.bitrate;
+  $<HTMLSelectElement>('opt-mode').value = p.mode;
+}
+{
+  const sel = $<HTMLSelectElement>('opt-profile');
+  const saved = localStorage.getItem('ariranhacast.profile') ?? 'game';
+  sel.value = saved in PROFILES || saved === 'custom' ? saved : 'game';
+  if (sel.value === 'custom') {
+    try {
+      const c = JSON.parse(localStorage.getItem('ariranhacast.custom') ?? '{}');
+      for (const k of ['res', 'fps', 'bitrate', 'mode'] as const) if (typeof c[k] === 'string') $<HTMLSelectElement>(`opt-${k}`).value = c[k];
+    } catch {
+      /* usa o padrão */
+    }
+  } else applyProfile(sel.value);
+  sel.onchange = () => {
+    applyProfile(sel.value);
+    localStorage.setItem('ariranhacast.profile', sel.value);
+  };
+  for (const k of ['res', 'fps', 'bitrate', 'mode'] as const) {
+    $<HTMLSelectElement>(`opt-${k}`).addEventListener('change', () => {
+      sel.value = 'custom';
+      localStorage.setItem('ariranhacast.profile', 'custom');
+      const c = Object.fromEntries((['res', 'fps', 'bitrate', 'mode'] as const).map((x) => [x, $<HTMLSelectElement>(`opt-${x}`).value]));
+      localStorage.setItem('ariranhacast.custom', JSON.stringify(c));
+    });
+  }
+}
 
 function autoBitrateKbps(height: number, fps: number): number {
   const h = height || 1440;
@@ -943,7 +1181,9 @@ $('btn-start').onclick = async () => {
       const old = localScreen;
       await broadcast.replaceStream(stream, selected.name);
       old.getTracks().forEach((t) => t.stop());
+      if (broadcast.paused) broadcast.setPaused(false); // a fonte nova entra ao vivo
       setLocalScreen(stream, selected.name, note);
+      updateControls();
     } else {
       await goLive(stream, opts, selected.name, maxDirect, note);
     }
@@ -969,6 +1209,7 @@ function setLocalScreen(stream: MediaStream, title: string, note: string): void 
   });
   room?.setState({ screen: true, title });
   renderTiles();
+  syncClipTarget();
 }
 
 async function goLive(stream: MediaStream, opts: EncodeOpts, title: string, maxDirect: number, note = ''): Promise<void> {
@@ -1001,6 +1242,7 @@ function stopShare(): void {
   void window.ariranhacast.setStreaming(false);
   room?.setState({ screen: false, title: '' });
   renderTiles();
+  syncClipTarget();
   updateControls();
 }
 
@@ -1016,12 +1258,15 @@ function renderViewers(): void {
       li.append(name);
       const s = r.stats;
       if (s) {
-        const limit = s.limited !== 'none' ? ` · limitado: ${s.limited}` : '';
+        const limit = (s.limited !== 'none' ? ` · limitado: ${s.limited}` : '') + (s.capped ? ` · reduzida: ${s.capped}` : '');
         li.append(el('div', 'detail', `${s.width}x${s.height}@${s.fps} · ${(s.kbps / 1000).toFixed(1)} Mbps · ${s.codec} ${s.hardware ? 'GPU' : 'CPU'} · ${s.rttMs} ms · ${s.turn ? 'TURN' : 'direto'}${limit}`));
       }
       return li;
     }),
   );
+  const capped = rows.filter((r) => r.stats?.capped).length;
+  $('cap-note').hidden = !capped;
+  $('cap-note').textContent = capped ? `${capped} de ${rows.length} recebendo qualidade reduzida (escolha de quem assiste ou economia no TURN).` : '';
   if (testing) log('broadcast rows', rows.map((r) => `${r.name}:${r.via}:${r.receiving}:${r.stats?.codec ?? ''}:${r.stats?.kbps ?? 0}kbps`));
 }
 
@@ -1063,6 +1308,7 @@ function startMeter(stream: MediaStream): void {
 
 // ---------- atualização periódica (estatísticas de quem assistimos) ----------
 let pollCount = 0;
+let turnWarned = false;
 
 /** Rota de cada conexão (direta ou TURN) e quanto do nosso tráfego passou pelo TURN. */
 async function sampleRoutes(): Promise<void> {
@@ -1072,16 +1318,130 @@ async function sampleRoutes(): Promise<void> {
   const b = broadcast;
   if (!v || !c) return;
   const viaTurn = new Set<string>();
-  for (const [id, pc] of v.pcs()) if (await turnMeter.sample(pc)) viaTurn.add(id);
+  routes.clear();
+  for (const [id, pc] of v.pcs()) {
+    const route = await turnMeter.sample(pc);
+    if (!route) continue;
+    routes.set(id, route);
+    if (route.relay) viaTurn.add(id);
+    const q = await measurePc(pc);
+    if (q) v.links.set(id, q);
+  }
+  for (const id of [...v.links.keys()]) if (!routes.has(id)) v.links.delete(id);
   v.turnIds = viaTurn;
+  v.onchange();
+  // Todas as conexões pelo TURN (duas leituras seguidas) = este PC depende do TURN: não transmite a tela.
+  allRelayStreak = routes.size > 0 && viaTurn.size === routes.size ? allRelayStreak + 1 : 0;
+  if (viaTurnOnly() && b && broadcast === b && !testing) {
+    stopShare();
+    toast('Sua conexão passou a depender do TURN, então a transmissão de tela foi encerrada para não gastar a franquia.');
+  }
   for (const pc of c.pcs()) await turnMeter.sample(pc);
   for (const w of [...watches.values()]) for (const pc of w.watch.pcs()) await turnMeter.sample(pc);
-  for (const pc of b?.pcs() ?? []) await turnMeter.sample(pc);
+  for (const pc of broadcast?.pcs() ?? []) await turnMeter.sample(pc);
   const usage = $('turn-usage');
   usage.hidden = !hasTurn() && !turnMeter.monthBytes;
-  usage.textContent = `TURN: ${formatBytes(turnMeter.sessionBytes)} nesta sessão · ${formatBytes(turnMeter.monthBytes)} no mês (só o tráfego deste PC)`;
+  const limit = settings.turnLimitGb * 1024 ** 3;
+  const pct = limit ? Math.round((turnMeter.monthBytes / limit) * 100) : 0;
+  usage.classList.toggle('over', pct >= 80);
+  usage.textContent =
+    `TURN: ${formatBytes(turnMeter.sessionBytes)} nesta sessão · ${formatBytes(turnMeter.monthBytes)} no mês` +
+    (limit ? ` (${pct}% de ${settings.turnLimitGb} GB)` : '') +
+    ' · só o tráfego deste PC';
+  if (limit && pct >= 80 && !turnWarned) {
+    turnWarned = true;
+    toast(`Atenção: este PC já usou ${pct}% da franquia mensal do TURN.`);
+  }
   if (pollCount % 10 === 0) turnMeter.flush();
 }
+
+// ---------- clipes (replay) ----------
+/** Escolhe o que o replay grava: a sua transmissão; senão, a que você está assistindo (em foco, se houver). */
+function clipTarget(): MediaStream | null {
+  if (!settings.clipSeconds || !room) return null;
+  if (localScreen) return localScreen;
+  if (!settings.clipWatched) return null;
+  const focused = focusKey.startsWith('screen:') ? watches.get(focusKey.slice(7)) : undefined;
+  return focused?.stream ?? [...watches.values()].find((w) => w.stream)?.stream ?? null;
+}
+
+function syncClipTarget(): void {
+  const target = clipTarget();
+  if (clipBuf && target && clipBuf.key === ClipBuffer.keyOf(target)) return;
+  if (!clipBuf && !target) return;
+  clipBuf?.close();
+  clipBuf = null;
+  if (target) {
+    try {
+      clipBuf = new ClipBuffer(target, settings.clipSeconds);
+    } catch {
+      /* este PC não consegue gravar: segue sem clipes */
+    }
+  }
+  updateControls();
+}
+
+let clipping = false;
+async function saveClip(): Promise<void> {
+  if (clipping) return;
+  if (!settings.clipSeconds) return toast('Os clipes estão desligados em Configurações.');
+  if (!clipBuf) return toast('Nada para clipar: transmita a tela ou assista a uma transmissão.');
+  clipping = true;
+  try {
+    const clip = await clipBuf.save();
+    if (!clip) return toast('O replay ainda não tem vídeo suficiente.');
+    const r = await window.ariranhacast.saveClip(clip.data, clip.ext);
+    if (!r.ok || !r.path) return toast(`Não foi possível salvar o clipe: ${r.error ?? 'erro'}`);
+    cue(true);
+    toast(`Clipe de ${clip.seconds} s salvo em Vídeos/AriranhaCast.`);
+    log('clip', `${clip.seconds}s ${clip.ext} ${clip.data.byteLength}`);
+    if (!testing) void window.ariranhacast.showClip(r.path);
+  } finally {
+    clipping = false;
+  }
+}
+
+// ---------- relatório de conexão ----------
+async function connectionReport(): Promise<string> {
+  const lines: string[] = [`AriranhaCast ${appVersion} · protocolo ${PROTO} · ${new Date().toLocaleString('pt-BR')}`];
+  const n = lastNet ?? (lastNet = await probeNetwork());
+  lines.push('', '== Minha rede ==', describeNetwork(n));
+  lines.push('', '== Sala ==');
+  if (!room || !voice) lines.push('Fora de sala (entre numa sala para ver a rota até cada pessoa).');
+  else {
+    lines.push(`${room.roster.length} pessoa(s) · eu ${room.isHost ? 'hospedo' : 'sou participante'} · TURN ${hasTurn() ? 'configurado' : 'não configurado'}`);
+    for (const row of voice.rows()) {
+      if (row.self) continue;
+      const rt = routes.get(row.id);
+      const q = voice.links.get(row.id);
+      lines.push(
+        !row.connected || !rt
+          ? `✗ ${row.name}: sem conexão de voz (as duas redes não fecharam ligação direta)`
+          : `${rt.relay ? '△' : '✓'} ${row.name}: ${rt.relay ? 'pelo TURN' : 'direto'} · ${rt.family || '?'} ${rt.protocol} · ${rt.localType}→${rt.remoteType}` + (q ? ` · ping ${q.rttMs} ms · perda ${q.lossPct}% · jitter ${q.jitterMs} ms` : ''),
+      );
+    }
+    if (viaTurnOnly()) lines.push('Este PC depende do TURN: transmissão de tela bloqueada.');
+    lines.push(`TURN usado por este PC: ${formatBytes(turnMeter.sessionBytes)} na sessão, ${formatBytes(turnMeter.monthBytes)} no mês.`);
+  }
+  return lines.join('\n');
+}
+
+$('btn-report').onclick = async () => {
+  const btn = $<HTMLButtonElement>('btn-report');
+  const out = $('netcheck-out');
+  btn.disabled = true;
+  out.hidden = false;
+  out.textContent = 'Montando o relatório…';
+  try {
+    const text = await connectionReport();
+    out.textContent = text;
+    await navigator.clipboard.writeText(text).catch(() => {});
+    toast('Relatório copiado. Cole para quem vai te ajudar (não contém seu IP completo nem senhas).');
+    if (testing) log('report', text.replace(/\n/g, ' | '));
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 async function poll(): Promise<void> {
   pollCount++;
@@ -1093,6 +1453,7 @@ async function poll(): Promise<void> {
     }
   }
   if (pollCount % 2 === 0) await sampleRoutes();
+  if (pollCount % 5 === 0) syncClipTarget();
   for (const [id, w] of [...watches]) {
     if (!w.statsOn && !testing) continue;
     const s = await w.watch.stats();
@@ -1111,7 +1472,7 @@ async function poll(): Promise<void> {
   }
   if (testing && voice && cams && room) {
     log('voice', settings.name, `mic=${voice.micOn} ns=${voice.prefs.mode} err=${voice.micError}`, voice.rows().filter((r) => !r.self).map((r) => `${r.name}:${r.connected ? 'ok' : 'x'}:${r.speaking ? 'fala' : '-'}`));
-    log('turn', settings.name, `hasTurn=${hasTurn()} session=${turnMeter.sessionBytes} voiceTurn=${voice.turnIds.size} idpeer=${room.peer.disconnected ? 'disc' : 'conn'}${room.peer.destroyed ? '+destroyed' : ''} pcs=${voice.pcs().map(([, pc]) => pc.connectionState).join('/')} host=${room.isHost} roster=${room.roster.map((p) => p.name).join('/')}`);
+    log('turn', settings.name, `turnOnly=${viaTurnOnly()} hasTurn=${hasTurn()} session=${turnMeter.sessionBytes} voiceTurn=${voice.turnIds.size} idpeer=${room.peer.disconnected ? 'disc' : 'conn'}${room.peer.destroyed ? '+destroyed' : ''} pcs=${voice.pcs().map(([, pc]) => pc.connectionState).join('/')} host=${room.isHost} roster=${room.roster.map((p) => p.name).join('/')}`);
     log('cams', settings.name, `local=${!!cams.local} err=${cams.error} remote=${cams.remote.size}`, `tiles=${tiles.size}`);
   }
 }
@@ -1161,7 +1522,15 @@ if (testing) {
         if (!cur) return;
         const other = cur.roster.find((p) => p.id !== cur.selfId);
         log('act', what);
-        if (what === 'leave') leaveRoom();
+        if (what === 'clip') void saveClip();
+        else if (what === 'report') $('btn-report').click();
+        else if (what === 'pause') $('btn-pause').click();
+        else if (what === 'lowq') for (const w of watches.values()) w.watch.setQuality('low');
+        else if (what === 'chat') {
+          // PNG 1x1 válido + texto com link, emoji e emote
+          const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (ch) => ch.charCodeAt(0));
+          log('chat sent', cur.addEmote('pixel', png), cur.sendChat('oi **galera** :fire: :pixel: https://example.com/a', { mime: 'image/png', data: png }));
+        } else if (what === 'leave') leaveRoom();
         else if (what === 'kick' && other) cur.kick(other.id);
         else if (what === 'mute' && other) cur.muteMember(other.id);
       }, Number(at) * 1000);

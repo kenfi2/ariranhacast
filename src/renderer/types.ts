@@ -13,8 +13,8 @@ export interface AriranhaBridge {
   startAudioCap(sourceId: string): Promise<{ ok: boolean; reason?: string }>;
   stopAudioCap(): Promise<void>;
   onPcm(cb: (chunk: Uint8Array) => void): void;
-  setHotkeys(keys: { mic: string; deaf: string } | null): Promise<{ mic: boolean; deaf: boolean }>;
-  onHotkey(cb: (which: 'mic' | 'deaf' | 'leave') => void): void;
+  setHotkeys(keys: { mic: string; deaf: string; clip: string } | null): Promise<{ mic: boolean; deaf: boolean; clip: boolean }>;
+  onHotkey(cb: (which: 'mic' | 'deaf' | 'leave' | 'clip') => void): void;
   setInRoom(on: boolean, micOn: boolean): Promise<void>;
   appVersion(): Promise<string>;
   onUpdate(cb: (text: string) => void): void;
@@ -24,6 +24,36 @@ export interface AriranhaBridge {
   onUpdater(cb: (s: UpdaterState) => void): void;
   firewallStatus(): Promise<FirewallState>;
   firewallFix(): Promise<FirewallState>;
+  openExternal(url: string): Promise<boolean>;
+  saveClip(data: ArrayBuffer, ext: string): Promise<{ ok: boolean; path?: string; error?: string }>;
+  showClip(path: string): Promise<void>;
+  flash(): Promise<void>;
+  gifSearch(key: string, query: string): Promise<{ ok: boolean; items: GifItem[]; error?: string }>;
+  gifFetch(url: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }>;
+  setOverlay(cfg: OverlayConfig): Promise<void>;
+  pushOverlay(rows: OverlayRow[]): void;
+  onDeepLink(cb: (code: string) => void): void;
+  pendingDeepLink(): Promise<string>;
+}
+
+export interface GifItem {
+  id: string;
+  title: string;
+  thumb: string; // data URL
+  url: string; // arquivo a baixar quando escolhido
+}
+
+export interface OverlayConfig {
+  enabled: boolean;
+  corner: 'tl' | 'tr' | 'bl' | 'br';
+  mode: 'speaking' | 'all';
+}
+
+export interface OverlayRow {
+  name: string;
+  color: string;
+  speaking: boolean;
+  muted: boolean;
 }
 
 export type UpdaterState =
@@ -44,6 +74,8 @@ declare global {
 }
 
 export type CodecChoice = 'auto' | 'AV1' | 'H265' | 'H264' | 'VP9' | 'VP8';
+
+export type Quality = 'high' | 'med' | 'low';
 
 /** Parâmetros de encode; quem transmite manda isso aos relays para repassarem na mesma qualidade. */
 export interface EncodeOpts {
@@ -71,6 +103,8 @@ export type Msg =
   | { t: 'end' }
   // quem assiste → quem transmite
   | { t: 'status'; receiving: boolean }
+  | { t: 'quality'; q: Quality }
+  | { t: 'paused'; on: boolean }
   | { t: 'need-parent'; failed: string }
   // sala: entrada (anfitrião desafia, participante se apresenta)
   | { t: 'challenge'; nonce: string; proto: number; version: string; password: boolean }
@@ -82,7 +116,37 @@ export type Msg =
   | { t: 'ice-config'; servers: RTCIceServer[] }
   | { t: 'state'; cam: boolean; screen: boolean; title: string }
   | { t: 'cmd'; cmd: 'mute' }
-  | { t: 'kick' };
+  | { t: 'kick' }
+  // chat: membro → anfitrião (anfitrião define autor, hora e id) e anfitrião → todos
+  | { t: 'chat'; text: string; img?: ChatImage }
+  | { t: 'chat-msg'; m: ChatMessage }
+  | { t: 'chat-history'; msgs: ChatMessage[]; emotes: Emote[] }
+  | { t: 'chat-del'; id: string }
+  | { t: 'typing'; id?: string }
+  | { t: 'emote-add'; emote: Emote }
+  | { t: 'emote'; emote: Emote };
+
+export interface ChatImage {
+  mime: string;
+  data: Uint8Array;
+}
+
+export interface ChatMessage {
+  id: string;
+  from: string; // id do participante (definido pelo anfitrião)
+  name: string;
+  ts: number;
+  text: string;
+  img?: ChatImage;
+  expired?: boolean; // a imagem foi descartada do histórico para poupar memória
+}
+
+export interface Emote {
+  name: string; // a-z, 0-9 e _
+  mime: string;
+  data: Uint8Array;
+  by: string;
+}
 
 export interface Settings {
   name: string;
@@ -90,4 +154,13 @@ export interface Settings {
   iceServers: string; // JSON com RTCIceServer[] extras (TURN)
   hotMic: string; // atalho global: ligar/desligar microfone
   hotDeaf: string; // atalho global: silenciar vozes
+  hotClip: string; // atalho global: salvar um clipe
+  giphyKey: string; // chave gratuita do Giphy para buscar GIFs no chat (opcional)
+  relayEconomy: boolean; // limita a qualidade das conexões que passam pelo TURN
+  turnLimitGb: number; // limite mensal do plano de TURN, para avisar (0 = sem aviso)
+  overlayOn: boolean; // mostra quem está falando por cima do jogo
+  overlayCorner: 'tl' | 'tr' | 'bl' | 'br';
+  overlayMode: 'speaking' | 'all';
+  clipSeconds: 0 | 30 | 60; // replay: quanto tempo para trás um clipe alcança (0 = desligado)
+  clipWatched: boolean; // também grava as transmissões que você assiste
 }

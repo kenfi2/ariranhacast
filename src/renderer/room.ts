@@ -1,10 +1,11 @@
 import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import { ID_PREFIX, iceServers, makePeer, newRoomCode, setRoomIce, shareableIce } from './signaling';
-import type { Msg, RosterEntry, Settings } from './types';
+import { cleanChatText, cleanEmote, cleanImage, cleanMessage, historyFor, MAX_EMOTES, trimLog } from './chatutil';
+import type { ChatImage, ChatMessage, Emote, Msg, RosterEntry, Settings } from './types';
 
 /** Versão do protocolo entre os apps. Muda quando versões diferentes deixam de se entender. */
-export const PROTO = 3;
+export const PROTO = 4;
 const MAX_MEMBERS = 16;
 const DEAD_AFTER_MS = 5000;
 const RECOVER_FOR_MS = 120_000;
@@ -82,6 +83,15 @@ export class Room {
   private timer = 0;
   private closed = false;
   private recovering = false;
+
+  // ---- chat ----
+  chatLog: ChatMessage[] = [];
+  emotes = new Map<string, Emote>();
+  onchat: (m: ChatMessage) => void = () => {};
+  onchatdel: (id: string) => void = () => {};
+  ontyping: (id: string) => void = () => {};
+  onemote: (e: Emote) => void = () => {};
+  onhistory: () => void = () => {};
 
   onroster: (list: RosterEntry[]) => void = () => {};
   onend: (reason: string) => void = () => {};
@@ -256,12 +266,27 @@ export class Room {
         // Antes da lista: as conexões que o novo participante abrir já usam o mesmo TURN.
         const servers = shareableIce();
         if (servers.length) send({ t: 'ice-config', servers });
+        send({ t: 'chat-history', msgs: historyFor(this.chatLog), emotes: [...this.emotes.values()] });
         this.publish();
       } else if (msg.t === 'state') {
         member.entry.cam = msg.cam === true;
         member.entry.screen = msg.screen === true;
         member.entry.title = str(msg.title, 80);
         this.publish();
+      } else if (msg.t === 'chat') {
+        const text = cleanChatText(msg.text).trim();
+        let img = msg.img ? cleanImage(msg.img) : null;
+        if (img && !this.imageBudget(conn.peer, img.data.byteLength)) img = null; // imagens demais em pouco tempo
+        if (text || img) this.hostChat(conn.peer, member.entry.name, text, img ?? undefined);
+      } else if (msg.t === 'chat-del') {
+        const id = typeof msg.id === 'string' ? msg.id : '';
+        if (this.chatLog.some((m) => m.id === id && m.from === conn.peer)) this.dropChat(id, true);
+      } else if (msg.t === 'typing') {
+        this.broadcast({ t: 'typing', id: conn.peer }, conn.peer);
+        this.ontyping(conn.peer);
+      } else if (msg.t === 'emote-add') {
+        const e = cleanEmote(msg.emote, conn.peer);
+        if (e) this.acceptEmote(e);
       }
     });
     const gone = () => {
@@ -341,6 +366,115 @@ export class Room {
     this.members.delete(id);
     setTimeout(() => m.conn.close(), 300);
     this.publish();
+  }
+
+  get hasPassword(): boolean {
+    return !!this.password;
+  }
+
+  // ---------- chat ----------
+  /** Envia uma mensagem (texto e/ou imagem). Quem hospeda distribui; os demais mandam a ele. */
+  sendChat(text: string, img?: ChatImage): boolean {
+    text = cleanChatText(text).trim();
+    if (!text && !img) return false;
+    if (this.isHost) {
+      this.hostChat(this.selfId, this.self.name, text, img);
+      return true;
+    }
+    if (!this.control?.open) return false;
+    this.control.send({ t: 'chat', text, img } satisfies Msg);
+    return true;
+  }
+
+  /** Cada pessoa pode mandar até 16 MB de imagens por minuto (protege a banda de todos). */
+  private imgSpent = new Map<string, { at: number; bytes: number }>();
+  private imageBudget(id: string, bytes: number): boolean {
+    const now = Date.now();
+    const cur = this.imgSpent.get(id);
+    const slot = cur && now - cur.at < 60_000 ? cur : { at: now, bytes: 0 };
+    if (slot.bytes + bytes > 16 * 1024 * 1024) return false;
+    slot.bytes += bytes;
+    this.imgSpent.set(id, slot);
+    return true;
+  }
+
+  private hostChat(from: string, name: string, text: string, img?: ChatImage): void {
+    const m: ChatMessage = { id: `${Date.now().toString(36)}-${randomHex(4)}`, from, name, ts: Date.now(), text, img };
+    this.pushChat(m);
+    this.broadcast({ t: 'chat-msg', m });
+  }
+
+  private pushChat(m: ChatMessage): void {
+    if (this.chatLog.some((x) => x.id === m.id)) return;
+    this.chatLog.push(m);
+    trimLog(this.chatLog);
+    this.onchat(m);
+  }
+
+  private mergeHistory(msg: Extract<Msg, { t: 'chat-history' }>): void {
+    const have = new Set(this.chatLog.map((m) => m.id));
+    for (const raw of Array.isArray(msg.msgs) ? msg.msgs.slice(-200) : []) {
+      const m = cleanMessage(raw);
+      if (m && !have.has(m.id)) {
+        this.chatLog.push(m);
+        have.add(m.id);
+      }
+    }
+    this.chatLog.sort((a, b) => a.ts - b.ts);
+    trimLog(this.chatLog);
+    for (const raw of Array.isArray(msg.emotes) ? msg.emotes.slice(0, MAX_EMOTES) : []) {
+      const e = cleanEmote(raw, typeof raw?.by === 'string' ? raw.by.slice(0, 64) : '');
+      if (e) this.storeEmote(e);
+    }
+    this.onhistory();
+  }
+
+  /** Apaga uma mensagem (a própria; quem hospeda pode apagar qualquer uma). */
+  deleteChat(id: string): void {
+    const m = this.chatLog.find((x) => x.id === id);
+    if (!m) return;
+    if (this.isHost) this.dropChat(id, true);
+    else if (m.from === this.selfId && this.control?.open) this.control.send({ t: 'chat-del', id } satisfies Msg);
+  }
+
+  private dropChat(id: string, relay: boolean): void {
+    const i = this.chatLog.findIndex((m) => m.id === id);
+    if (i === -1) return;
+    this.chatLog.splice(i, 1);
+    this.onchatdel(id);
+    if (relay) this.broadcast({ t: 'chat-del', id });
+  }
+
+  sendTyping(): void {
+    if (this.isHost) this.broadcast({ t: 'typing', id: this.selfId });
+    else if (this.control?.open) this.control.send({ t: 'typing' } satisfies Msg);
+  }
+
+  /** Adiciona um emote à sala (imagem pequena usada como :nome:). */
+  addEmote(name: string, data: Uint8Array): boolean {
+    const e = cleanEmote({ name, data }, this.selfId);
+    if (!e) return false;
+    if (this.isHost) return this.acceptEmote(e);
+    if (!this.control?.open) return false;
+    this.control.send({ t: 'emote-add', emote: e } satisfies Msg);
+    return true;
+  }
+
+  private acceptEmote(e: Emote): boolean {
+    const old = this.emotes.get(e.name);
+    if ((old && old.by !== e.by) || (!old && this.emotes.size >= MAX_EMOTES)) return false;
+    this.storeEmote(e);
+    this.broadcast({ t: 'emote', emote: e });
+    return true;
+  }
+
+  private storeEmote(e: Emote): void {
+    this.emotes.set(e.name, e);
+    this.onemote(e);
+  }
+
+  private broadcast(msg: Msg, except?: string): void {
+    for (const [id, m] of this.members) if (id !== except && m.conn.open) m.conn.send(msg);
   }
 
   // ---------- participar ----------
@@ -435,6 +569,18 @@ export class Room {
           this.oncommand('mute');
         } else if (msg.t === 'kick') {
           this.end('Você foi removido da sala por quem a hospeda.');
+        } else if (msg.t === 'chat-msg') {
+          const m = cleanMessage(msg.m);
+          if (m) this.pushChat(m);
+        } else if (msg.t === 'chat-history') {
+          this.mergeHistory(msg);
+        } else if (msg.t === 'chat-del') {
+          if (typeof msg.id === 'string') this.dropChat(msg.id, false);
+        } else if (msg.t === 'typing') {
+          if (typeof msg.id === 'string' && msg.id !== this.selfId) this.ontyping(msg.id.slice(0, 64));
+        } else if (msg.t === 'emote') {
+          const e = cleanEmote(msg.emote, typeof msg.emote?.by === 'string' ? msg.emote.by.slice(0, 64) : '');
+          if (e) this.storeEmote(e);
         }
       });
       const lost = () => {

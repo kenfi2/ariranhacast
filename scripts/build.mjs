@@ -11,6 +11,12 @@ await build({ ...common, entryPoints: ['src/preload.ts'], outfile: 'dist/preload
 await build({ ...common, entryPoints: ['src/renderer/app.ts'], outfile: 'dist/renderer/app.js',
   platform: 'browser', format: 'iife', target: 'chrome130', loader: { '.wasm': 'binary' } });
 
+await build({ ...common, entryPoints: ['src/overlay-preload.ts'], outfile: 'dist/overlay-preload.js',
+  platform: 'node', format: 'cjs', external: ['electron'] });
+await build({ ...common, entryPoints: ['src/renderer/overlay.ts'], outfile: 'dist/renderer/overlay.js',
+  platform: 'browser', format: 'iife', target: 'chrome130' });
+cpSync('src/renderer/overlay.html', 'dist/renderer/overlay.html');
+cpSync('src/renderer/overlay.css', 'dist/renderer/overlay.css');
 cpSync('src/renderer/index.html', 'dist/renderer/index.html');
 cpSync('assets/tray.png', 'dist/tray.png');
 cpSync('assets/icon.png', 'dist/icon.png');
