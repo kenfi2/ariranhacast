@@ -1,0 +1,30 @@
+{
+  "name": "ariranhacast",
+  "productName": "AriranhaCast",
+  "version": "0.3.0",
+  "description": "Sala de voz P2P com transmissão de tela e webcam (WebRTC)",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit",
+    "dist": "npm run build && node scripts/dist.mjs"
+  },
+  "devDependencies": {
+    "@electron/fuses": "^2.1.3",
+    "@sapphi-red/web-noise-suppressor": "^0.4.1",
+    "@types/node": "^26.6.6",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.0.0",
+    "electron-updater": "^6.3.0",
+    "esbuild": "^0.25.0",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5",
+    "resedit": "^3.1.0",
+    "typescript": "^5.6.0"
+  },
+  "ariranhacast": {
+    "updateUrl": "https://github.com/kenfi2/ariranhacast/releases/latest/download/"
+  },
+  "author": "AriranhaCast"
+}

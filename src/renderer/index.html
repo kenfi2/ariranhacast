@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src https: wss: http: ws:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+    <title>AriranhaCast</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <div class="brand"><svg class="logo" viewBox="0 0 100 100" aria-hidden="true"><circle cx="23" cy="38" r="6" fill="#8a5a3c"/><circle cx="77" cy="38" r="6" fill="#8a5a3c"/><ellipse cx="50" cy="56" rx="34" ry="25" fill="#8a5a3c"/><ellipse cx="50" cy="66" rx="24" ry="16" fill="#edDEc6"/><ellipse cx="50" cy="58" rx="7" ry="5" fill="#2b1d17"/><circle cx="38" cy="48" r="4" fill="#2b1d17"/><circle cx="62" cy="48" r="4" fill="#2b1d17"/></svg>AriranhaCast <span id="app-version" class="muted"></span></div>
+      <button id="btn-settings" class="ghost">Configurações</button>
+    </header>
+
+    <!-- Início -->
+    <main id="view-home" class="view">
+      <section class="card">
+        <h2>Criar sala</h2>
+        <p>Abre uma sala de voz. Lá dentro, cada um decide se só fala, liga a câmera ou transmite a tela.</p>
+        <input id="create-pass" type="password" maxlength="64" placeholder="Senha (opcional)" autocomplete="off" />
+        <button id="btn-create" class="primary">Criar sala</button>
+      </section>
+      <section class="card">
+        <h2>Entrar em uma sala</h2>
+        <p>Digite o código que te passaram.</p>
+        <form id="join-form">
+          <input id="join-code" placeholder="CÓDIGO" maxlength="8" autocomplete="off" spellcheck="false" />
+          <button class="primary" type="submit">Entrar</button>
+        </form>
+        <input id="join-pass" type="password" maxlength="64" placeholder="Senha (se a sala tiver)" autocomplete="off" />
+      </section>
+    </main>
+
+    <!-- Sala -->
+    <main id="view-room" class="view" hidden>
+      <div id="room-main">
+        <div id="room-status" class="banner" hidden></div>
+        <div id="stage" class="tiles"></div>
+        <div id="controls">
+          <div class="ctl-left">
+            <span class="label-inline">Sala</span>
+            <span id="room-code" class="code"></span>
+            <button id="btn-copy" class="ghost small">Copiar</button>
+          </div>
+          <div class="ctl-center">
+            <button id="btn-mic" class="round" title="Microfone"></button>
+            <button id="btn-deaf" class="round" title="Silenciar vozes"></button>
+            <button id="btn-cam" class="round" title="Câmera"></button>
+            <button id="btn-screen" class="round" title="Transmitir tela"></button>
+            <button id="btn-leave" class="round hangup" title="Sair da sala"></button>
+          </div>
+          <div class="ctl-right">
+            <button id="btn-panel" class="ghost small">Painel</button>
+          </div>
+        </div>
+      </div>
+      <aside id="room-side" class="side">
+        <div id="voice-box" class="voice"></div>
+        <div id="turn-usage" class="muted" hidden></div>
+        <div id="mystream" hidden>
+          <h3>Sua transmissão</h3>
+          <div id="live-title" class="muted"></div>
+          <div class="label">Áudio transmitido</div>
+          <div class="meter"><div id="audio-level"></div></div>
+          <div id="audio-state" class="muted"></div>
+          <div id="stream-note" class="warn" hidden></div>
+          <h3>Assistindo <span id="viewer-count" class="pill">0</span></h3>
+          <ul id="viewer-list"></ul>
+          <button id="btn-switch" class="ghost">Trocar tela/janela</button>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Escolher o que transmitir -->
+    <dialog id="dlg-share">
+      <div class="share">
+        <div class="share-main">
+          <div class="row between">
+            <h2>O que você quer transmitir?</h2>
+            <button id="btn-refresh" class="ghost small">Atualizar lista</button>
+          </div>
+          <h3>Telas</h3>
+          <div id="grid-screens" class="grid"></div>
+          <h3>Janelas</h3>
+          <div id="grid-windows" class="grid"></div>
+        </div>
+        <aside class="share-side">
+          <h3>Qualidade</h3>
+          <label>Resolução
+            <select id="opt-res">
+              <option value="720">720p</option>
+              <option value="1080" selected>1080p</option>
+              <option value="1440">1440p</option>
+              <option value="0">Original</option>
+            </select>
+          </label>
+          <label>Quadros por segundo
+            <select id="opt-fps">
+              <option value="30">30</option>
+              <option value="60" selected>60</option>
+            </select>
+          </label>
+          <label>Bitrate máximo
+            <select id="opt-bitrate">
+              <option value="0" selected>Automático</option>
+              <option value="3000">3 Mbps</option>
+              <option value="6000">6 Mbps</option>
+              <option value="10000">10 Mbps</option>
+              <option value="16000">16 Mbps</option>
+              <option value="25000">25 Mbps</option>
+            </select>
+          </label>
+          <label>Prioridade
+            <select id="opt-mode">
+              <option value="motion" selected>Fluidez (jogos)</option>
+              <option value="detail">Nitidez (texto, código)</option>
+            </select>
+          </label>
+          <label>Codec
+            <select id="opt-codec"></select>
+          </label>
+          <label>Áudio
+            <select id="opt-audio">
+              <option value="auto" selected>Só do aplicativo escolhido</option>
+              <option value="system">Sistema inteiro</option>
+              <option value="none">Sem áudio</option>
+            </select>
+          </label>
+          <p class="muted">Em "só do aplicativo", uma janela leva apenas o som do programa dela; a tela inteira leva tudo, menos as vozes do AriranhaCast.</p>
+          <label>Conexões diretas
+            <select id="opt-direct">
+              <option value="3">3</option>
+              <option value="5" selected>5</option>
+              <option value="8">8</option>
+              <option value="99">Todas (sem relay)</option>
+            </select>
+          </label>
+          <div class="grow"></div>
+          <button id="btn-start" class="primary" disabled>Transmitir</button>
+          <button id="btn-share-cancel" class="ghost">Cancelar</button>
+        </aside>
+      </div>
+    </dialog>
+
+    <dialog id="dlg-settings">
+      <form method="dialog">
+        <h2>Configurações</h2>
+        <label>Seu nome <input id="set-name" maxlength="24" /></label>
+        <label>Servidor de sinalização próprio (opcional)
+          <input id="set-server" placeholder="exemplo.com:9000 — vazio usa a nuvem pública do PeerJS" />
+        </label>
+        <label>Servidor TURN (opcional): JSON ou URL de credenciais
+          <textarea id="set-ice" rows="3" spellcheck="false" placeholder='https://SEUAPP.metered.live/api/v1/turn/credentials?apiKey=...   ou   [{"urls":"turn:exemplo.com:3478","username":"u","credential":"s"}]'></textarea>
+        </label>
+        <p class="muted">O TURN retransmite a conexão quando duas redes não fecham ligação direta (CGNAT). Basta quem cria a sala configurar: os participantes recebem o mesmo servidor ao entrar. Todos precisam usar o mesmo servidor de sinalização. Mudanças valem a partir da próxima sala.</p>
+        <div class="row hot">
+          <label>Atalho: microfone <input id="set-hot-mic" readonly placeholder="clique e pressione" /></label>
+          <label>Atalho: silenciar vozes <input id="set-hot-deaf" readonly placeholder="clique e pressione" /></label>
+        </div>
+        <p class="muted">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho.</p>
+        <div class="row">
+          <button id="btn-netcheck" type="button" class="ghost">Testar minha rede</button>
+        </div>
+        <pre id="netcheck-out" class="netcheck" hidden></pre>
+        <div class="row end">
+          <button id="set-save" class="primary" value="save">Salvar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" hidden></div>
+    <script src="app.js"></script>
+  </body>
+</html>
