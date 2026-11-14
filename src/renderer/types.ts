@@ -18,9 +18,22 @@ export interface AriranhaBridge {
   setInRoom(on: boolean, micOn: boolean): Promise<void>;
   appVersion(): Promise<string>;
   onUpdate(cb: (text: string) => void): void;
+  updaterState(): Promise<UpdaterState>;
+  updaterCheck(): Promise<void>;
+  updaterInstall(): Promise<boolean>;
+  onUpdater(cb: (s: UpdaterState) => void): void;
   firewallStatus(): Promise<FirewallState>;
   firewallFix(): Promise<FirewallState>;
 }
+
+export type UpdaterState =
+  | { state: 'disabled'; reason: 'dev' | 'portatil' | 'sem-url' }
+  | { state: 'checking' }
+  | { state: 'uptodate' }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'ready'; version: string }
+  | { state: 'error'; message: string };
 
 export type FirewallState = 'ok' | 'missing' | 'blocked' | 'unknown' | 'na';
 

@@ -313,24 +313,76 @@ async function ensureFirewall(): Promise<void> {
 // "ariranhacast.updateUrl" (HTTPS) preenchido em package.json; nesse caso o instalador grava
 // resources/app-update.yml, que diz ao electron-updater onde procurar. O arquivo baixado
 // é conferido contra o SHA-512 publicado no latest.yml antes de ser instalado.
+type UpdState =
+  | { state: 'disabled'; reason: 'dev' | 'portatil' | 'sem-url' }
+  | { state: 'checking' }
+  | { state: 'uptodate' }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'ready'; version: string }
+  | { state: 'error'; message: string };
+
+let upd: UpdState = { state: 'disabled', reason: dev ? 'dev' : 'portatil' };
+let updater: typeof import('electron-updater').autoUpdater | null = null;
+let updVersion = '';
+
+function setUpd(s: UpdState): void {
+  upd = s;
+  send('lc:updater', s);
+}
+
+function shortError(e: unknown): string {
+  const raw = String((e as { message?: unknown })?.message ?? e ?? '').split('\n')[0];
+  if (/404/.test(raw)) return 'o arquivo da nova versão não está na release (erro 404).';
+  if (/ENOTFOUND|ECONN|ETIMEDOUT|network|net::/i.test(raw)) return 'sem conexão com o GitHub.';
+  return raw.replace(/https?:\/\/\S+/g, '[link]').slice(0, 110) || 'erro desconhecido.';
+}
+
+function checkForUpdates(): void {
+  if (!updater || upd.state === 'checking' || upd.state === 'downloading' || upd.state === 'ready') return;
+  setUpd({ state: 'checking' });
+  updater.checkForUpdates().catch((e) => setUpd({ state: 'error', message: shortError(e) }));
+}
+
 function startUpdater(): void {
+  // Só para testar a interface (em desenvolvimento): --lc-fakeupd=checking|downloading|ready|error|uptodate
+  const fake = arg('fakeupd');
+  if (dev && fake) {
+    const fakes: Record<string, UpdState> = {
+      checking: { state: 'checking' },
+      downloading: { state: 'downloading', version: '0.3.2', percent: 45 },
+      ready: { state: 'ready', version: '0.3.2' },
+      error: { state: 'error', message: 'o arquivo da nova versão não está na release (erro 404).' },
+      uptodate: { state: 'uptodate' },
+    };
+    if (fakes[fake]) setTimeout(() => setUpd(fakes[fake]), 800);
+    return;
+  }
   if (dev) return;
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const url: unknown = pkg?.ariranhacast?.updateUrl;
-    if (typeof url !== 'string' || !url.startsWith('https://')) return;
-    if (!fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'))) return;
+    if (typeof url !== 'string' || !url.startsWith('https://')) return void (upd = { state: 'disabled', reason: 'sem-url' });
+    if (!fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'))) return void (upd = { state: 'disabled', reason: 'portatil' });
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
+    updater = autoUpdater;
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowDowngrade = false;
-    autoUpdater.on('update-downloaded', (info) => send('lc:update', `Versão ${info.version} baixada. Ela será instalada quando você fechar o AriranhaCast.`));
-    autoUpdater.on('error', () => {});
-    void autoUpdater.checkForUpdates().catch(() => {});
-    setInterval(() => void autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
+    autoUpdater.on('update-available', (info) => {
+      updVersion = info.version;
+      setUpd({ state: 'available', version: info.version });
+    });
+    autoUpdater.on('update-not-available', () => setUpd({ state: 'uptodate' }));
+    autoUpdater.on('download-progress', (p) => setUpd({ state: 'downloading', version: updVersion, percent: Math.max(0, Math.min(100, Math.round(p.percent))) }));
+    autoUpdater.on('update-downloaded', (info) => setUpd({ state: 'ready', version: info.version }));
+    autoUpdater.on('error', (e) => setUpd({ state: 'error', message: shortError(e) }));
+    upd = { state: 'uptodate' };
+    checkForUpdates();
+    setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
   } catch {
-    /* sem atualização automática */
+    upd = { state: 'disabled', reason: 'portatil' };
   }
 }
 
@@ -460,6 +512,14 @@ app.whenReady().then(() => {
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
   handle('lc:hotkeys', (keys: unknown) => setHotkeys(keys));
+  handle('lc:updater-state', () => upd);
+  handle('lc:updater-check', () => checkForUpdates());
+  handle('lc:updater-install', () => {
+    if (upd.state !== 'ready' || !updater) return false;
+    quitting = true; // não esconder a janela na bandeja: o app precisa fechar de verdade
+    updater.quitAndInstall(true, true); // instala em silêncio e reabre o app
+    return true;
+  });
   handle('lc:firewall-status', () => firewallState());
   handle('lc:firewall-fix', async () => {
     const st = await firewallFix();

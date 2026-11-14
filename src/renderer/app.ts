@@ -4,7 +4,7 @@ import { availableCodecs } from './codecs';
 import { PROTO, Room } from './room';
 import { checkNetwork } from './netcheck';
 import { hasTurn, loadIce, normalizeCode } from './signaling';
-import type { CodecChoice, EncodeOpts, RosterEntry, Settings, SourceInfo } from './types';
+import type { CodecChoice, EncodeOpts, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
 import { mountVoicePanel } from './voicePanel';
 import { formatBytes, TurnMeter } from './turnmeter';
@@ -56,6 +56,88 @@ void window.ariranhacast.appVersion().then((v) => {
   $('app-version').textContent = `versão ${v}`;
 });
 window.ariranhacast.onUpdate((text) => toast(text));
+
+// ---- atualização automática: verificando, baixando, pronta (com botão de reiniciar) ----
+let updHideTimer = 0;
+let updArmed = false;
+let lastUpd: UpdaterState = { state: 'disabled', reason: 'dev' };
+const UPD_OFF: Record<string, string> = {
+  portatil: 'Atualização automática indisponível: a versão portátil não se atualiza sozinha. Instale pelo instalador.',
+  'sem-url': 'Atualização automática desligada nesta versão.',
+  dev: 'Atualização automática indisponível em modo de desenvolvimento.',
+};
+
+function renderUpdater(s: UpdaterState): void {
+  lastUpd = s;
+  clearTimeout(updHideTimer);
+  updArmed = false;
+  const box = $('upd');
+  const btn = $<HTMLButtonElement>('upd-btn');
+  const bar = $('upd-bar');
+  const text = $('upd-text');
+  box.dataset.state = s.state;
+  box.hidden = s.state === 'disabled';
+  $('upd-spin').hidden = !(s.state === 'checking' || s.state === 'available' || s.state === 'downloading');
+  bar.hidden = s.state !== 'downloading';
+  btn.hidden = !(s.state === 'ready' || s.state === 'error');
+  btn.disabled = false;
+  switch (s.state) {
+    case 'checking':
+      text.textContent = 'Verificando atualizações…';
+      break;
+    case 'uptodate':
+      text.textContent = 'Você está na versão mais recente ✓';
+      updHideTimer = window.setTimeout(() => (box.hidden = true), 5000);
+      break;
+    case 'available':
+      text.textContent = `Versão ${s.version} encontrada. Começando o download…`;
+      break;
+    case 'downloading':
+      text.textContent = `Baixando a versão ${s.version}… ${s.percent}%`;
+      ($('upd-bar').firstElementChild as HTMLElement).style.width = `${s.percent}%`;
+      break;
+    case 'ready':
+      text.textContent = `Versão ${s.version} pronta para instalar.`;
+      btn.textContent = 'Reiniciar e atualizar';
+      break;
+    case 'error':
+      text.textContent = `Não consegui atualizar: ${s.message}`;
+      btn.textContent = 'Tentar de novo';
+      break;
+  }
+  const set = $('upd-set-text');
+  const check = $<HTMLButtonElement>('btn-upd-check');
+  check.hidden = s.state === 'disabled';
+  check.disabled = s.state === 'checking' || s.state === 'downloading' || s.state === 'ready';
+  set.textContent = s.state === 'disabled' ? (UPD_OFF[s.reason] ?? '') : `Versão instalada: ${$('app-version').textContent?.replace('versão ', '') ?? ''}`;
+}
+
+$('upd-btn').onclick = () => {
+  const btn = $<HTMLButtonElement>('upd-btn');
+  if (lastUpd.state === 'error') return void window.ariranhacast.updaterCheck();
+  if (lastUpd.state !== 'ready') return;
+  if (room && !updArmed) {
+    // Reiniciar derruba a sala: pede uma segunda confirmação em vez de sair sem avisar.
+    updArmed = true;
+    btn.textContent = 'Você está numa sala. Clique de novo para sair e reiniciar';
+    setTimeout(() => {
+      if (updArmed && lastUpd.state === 'ready') {
+        updArmed = false;
+        btn.textContent = 'Reiniciar e atualizar';
+      }
+    }, 6000);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Reiniciando…';
+  void window.ariranhacast.updaterInstall();
+};
+$('btn-upd-check').onclick = () => void window.ariranhacast.updaterCheck();
+window.ariranhacast.onUpdater((s) => {
+  renderUpdater(s);
+  if (s.state === 'ready') toast(`Versão ${s.version} baixada. Clique em "Reiniciar e atualizar" quando quiser.`);
+});
+void window.ariranhacast.updaterState().then(renderUpdater);
 
 $('btn-settings').onclick = () => {
   $<HTMLInputElement>('set-name').value = settings.name;

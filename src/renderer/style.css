@@ -134,3 +134,12 @@ button.busy:disabled { opacity: .9; }
 button.busy::before { content: ""; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
 .connecting { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.4); z-index: 20; max-width: 90vw; }
 .connecting[hidden] { display: none; }
+
+/* atualização automática */
+.upd { flex: 1; margin: 0 16px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 13px; min-width: 0; }
+.upd #upd-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upd[data-state=error] #upd-text { color: #ffb4a8; }
+.upd[data-state=uptodate] #upd-text { color: var(--muted); }
+.upd .bar { width: 140px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; flex: none; }
+.upd .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+button.small { padding: 4px 12px; font-size: 13px; }
