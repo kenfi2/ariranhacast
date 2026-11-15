@@ -4,6 +4,10 @@ Unicode true
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
+!ifndef NEEDMB
+  !define NEEDMB 450
+!endif
+
 !define APP "AriranhaCast"
 !define EXE "AriranhaCast.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP}"
@@ -51,7 +55,29 @@ Function WaitForApp
   ${Loop}
 FunctionEnd
 
+; Confere o espaço livre ANTES de mexer em qualquer arquivo: sem espaço no meio da cópia a
+; instalação anterior já teria sido apagada e o app ficaria sem abrir.
+Function CheckSpace
+  StrCpy $R2 $INSTDIR 3
+  StrCpy $R3 $R2 1 1
+  ${If} $R3 != ":"
+    Return
+  ${EndIf}
+  ClearErrors
+  ${DriveSpace} "$R2" "/D=F /S=M" $R0
+  ${If} ${Errors}
+    Return
+  ${EndIf}
+  ${If} $R0 < ${NEEDMB}
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONSTOP "Não há espaço suficiente no disco $R2 para instalar o AriranhaCast.$\r$\n$\r$\nLibere pelo menos ${NEEDMB} MB (agora há $R0 MB livres) e abra o instalador de novo. Nada foi alterado."
+    ${EndIf}
+    Abort
+  ${EndIf}
+FunctionEnd
+
 Section "Install"
+  Call CheckSpace
   Call WaitForApp
   ; remove os arquivos do app da versão anterior (os dados do usuário ficam em %APPDATA%)
   RMDir /r "$INSTDIR\resources"

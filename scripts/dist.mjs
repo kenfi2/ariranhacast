@@ -57,8 +57,18 @@ function findMakensis() {
   return { bin: 'makensis', env: {} };
 }
 const setup = `AriranhaCast-Setup-${version}.exe`;
+// Espaço que o instalador exige livre: o tamanho do app + folga.
+function dirBytes(dir) {
+  let n = 0;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    n += e.isDirectory() ? dirBytes(p) : statSync(p).size;
+  }
+  return n;
+}
+const needMb = Math.ceil(dirBytes(appDir) / 1048576) + 64;
 const { bin, env } = findMakensis();
-execFileSync(bin, ['-V2', `-DSRC=${resolve(appDir)}`, `-DOUT=${resolve('release', setup)}`, `-DVERSION=${version}`, 'scripts/installer.nsi'], {
+execFileSync(bin, ['-V2', `-DSRC=${resolve(appDir)}`, `-DOUT=${resolve('release', setup)}`, `-DVERSION=${version}`, `-DNEEDMB=${needMb}`, 'scripts/installer.nsi'], {
   stdio: 'inherit',
   env: { ...process.env, ...env },
 });

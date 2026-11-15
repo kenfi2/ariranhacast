@@ -4,6 +4,10 @@ Sala de voz P2P para um grupo pequeno de amigos, com webcam e transmissão de te
 latência. Mesmo pipeline do Discord: WebRTC (libwebrtc do Chromium) sobre UDP, encoder por
 hardware, bitrate adaptativo.
 
+## Novidades da 0.5.1
+
+- **Atualização à prova de disco cheio**: o app confere o espaço livre antes de fechar para atualizar (e não instala sozinho ao sair se faltar espaço), e o instalador confere antes de mexer em qualquer arquivo. Antes, ficar sem espaço no meio da cópia deixava o app sem abrir. Se isso já aconteceu: libere espaço e instale de novo por cima; suas configurações e figurinhas não se perdem.
+
 ## Novidades da 0.5.0
 
 - **Teste de microfone com retorno ao vivo** (como no Discord): no painel de voz, "Testar microfone" liga o retorno e você se ouve na hora, com medidor de nível. Enquanto o teste está ligado a sala não te ouve.

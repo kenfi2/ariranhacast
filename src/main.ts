@@ -500,6 +500,17 @@ function setUpd(s: UpdState): void {
   send('lc:updater', s);
 }
 
+// Espaço livre (MB) no disco onde o app está instalado; null se não der para medir.
+const MIN_FREE_MB = 600; // o app instalado tem ~360 MB e o instalador regrava tudo por cima
+function freeMB(): number | null {
+  try {
+    const st = fs.statfsSync(path.dirname(process.execPath));
+    return Math.floor((Number(st.bavail) * Number(st.bsize)) / 1048576);
+  } catch {
+    return null;
+  }
+}
+
 function shortError(e: unknown): string {
   const raw = String((e as { message?: unknown })?.message ?? e ?? '').split('\n')[0];
   if (/404/.test(raw)) return 'o arquivo da nova versão não está na release (erro 404).';
@@ -698,6 +709,12 @@ app.whenReady().then(() => {
   handle('lc:updater-check', () => checkForUpdates());
   handle('lc:updater-install', () => {
     if (upd.state !== 'ready' || !updater) return false;
+    // Disco cheio no meio da instalação deixa o app quebrado: avisa antes de fechar.
+    const free = freeMB();
+    if (free !== null && free < MIN_FREE_MB) {
+      setUpd({ state: 'error', message: `pouco espaço no disco: libere pelo menos ${MIN_FREE_MB} MB (restam ${free} MB) e tente de novo.` });
+      return false;
+    }
     quitting = true; // não esconder a janela na bandeja: o app precisa fechar de verdade
     updater.quitAndInstall(true, true); // instala em silêncio e reabre o app
     return true;
@@ -754,7 +771,14 @@ app.whenReady().then(() => {
   win?.webContents.once('did-finish-load', () => setTimeout(() => void ensureFirewall().catch(() => {}), 1500));
 });
 
-app.on('before-quit', () => (quitting = true));
+app.on('before-quit', () => {
+  quitting = true;
+  // Ao fechar, o app instala sozinho a atualização já baixada; com pouco espaço isso quebraria a instalação.
+  if (updater) {
+    const free = freeMB();
+    updater.autoInstallOnAppQuit = free === null || free >= MIN_FREE_MB;
+  }
+});
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   stopAudioCap();
