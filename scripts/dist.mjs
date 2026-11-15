@@ -3,7 +3,7 @@
 // atualização automática. Funciona em Windows, Linux ou macOS.
 //   ELECTRON_DIST  pasta com o Electron para Windows já extraído (evita baixar)
 //   MAKENSIS       caminho do makensis (senão procura no cache do electron-builder e no PATH)
-import { build, Platform } from 'electron-builder';
+import { Arch, build, Platform } from 'electron-builder';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -20,7 +20,7 @@ if (updateUrl && !updateUrl.startsWith('https://')) throw new Error('ariranhacas
 let appDir = '';
 rmSync('release', { recursive: true, force: true });
 await build({
-  targets: Platform.WINDOWS.createTarget('dir', 'x64'),
+  targets: Platform.WINDOWS.createTarget('dir', Arch.x64),
   config: {
     appId: 'dev.ariranhacast.app',
     productName: 'AriranhaCast',
