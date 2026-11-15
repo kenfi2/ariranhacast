@@ -6,6 +6,7 @@ interface CallPlugin {
   stop(): Promise<void>;
   setSpeaker(o: { on: boolean }): Promise<{ ok: boolean; headset: boolean }>;
   status(): Promise<{ headset: boolean; sdk: number; model: string }>;
+  keepScreenOn(o: { on: boolean }): Promise<void>;
 }
 
 const Call = registerPlugin<CallPlugin>('Call');
@@ -29,6 +30,13 @@ export async function callStop(): Promise<void> {
 export async function setSpeaker(on: boolean): Promise<{ ok: boolean; headset: boolean }> {
   if (!native) return { ok: false, headset: false };
   return Call.setSpeaker({ on }).catch(() => ({ ok: false, headset: false }));
+}
+
+let screenOn = false;
+export function keepScreenOn(on: boolean): void {
+  if (!native || on === screenOn) return;
+  screenOn = on;
+  void Call.keepScreenOn({ on }).catch(() => {});
 }
 
 export async function deviceStatus(): Promise<{ headset: boolean; sdk: number; model: string }> {

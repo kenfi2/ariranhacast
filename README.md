@@ -4,6 +4,12 @@ Sala de voz P2P para um grupo pequeno de amigos, com webcam e transmissão de te
 latência. Mesmo pipeline do Discord: WebRTC (libwebrtc do Chromium) sobre UDP, encoder por
 hardware, bitrate adaptativo.
 
+## Novidades da 0.6.2
+
+- **Android: configurações** (engrenagem na tela inicial e dentro da sala): supressão de ruído, sensibilidade do microfone com medidor, volume das vozes, sons da sala, qualidade e volume da transmissão, opção de continuar recebendo o vídeo em segundo plano, e um botão que copia um relatório para enviar em caso de problema.
+- **Android: volume de cada pessoa**: toque em alguém na lista para ajustar o volume ou silenciar só para você (fica salvo pelo nome).
+- Android: a tela fica acesa enquanto você assiste a uma transmissão; a lista de pessoas é atualizada no lugar em vez de recriada a cada mudança (menos trabalho para o aparelho).
+
 ## Novidades da 0.6.1
 
 - **App Android (protótipo)**: `AriranhaCast-Android-<versão>.apk` na página da release. Entra na sala, fala, ouve, usa o chat e assiste às transmissões; não transmite. A chamada continua com a tela apagada (notificação "Em uma sala"), há botão de alto-falante/auricular, e o vídeo para enquanto o app está em segundo plano (a voz continua).

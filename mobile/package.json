@@ -1,7 +1,7 @@
 {
   "name": "ariranhacast-android",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "AriranhaCast para Android (casco Capacitor em volta do mesmo código da sala do app de PC)",
   "scripts": {
     "build": "node ../scripts/build-mobile.mjs && npx cap sync android",

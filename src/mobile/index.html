@@ -14,6 +14,7 @@
       <img src="icon.png" alt="" class="hero-logo" />
       <h1>AriranhaCast</h1>
       <p class="muted" id="version"></p>
+      <button id="btn-gear-home" class="gear" title="Configurações"></button>
     </div>
     <label>Seu nome<input id="name" maxlength="24" autocomplete="off" /></label>
     <form id="join-form">
@@ -42,6 +43,7 @@
     <header class="room-top">
       <button id="btn-code" class="code" title="Compartilhar código"></button>
       <span id="room-status" class="muted"></span>
+      <button id="btn-gear-room" class="gear" title="Configurações"></button>
     </header>
     <section id="viewer" hidden>
       <video id="video" autoplay playsinline></video>
@@ -78,6 +80,57 @@
       <button id="btn-leave" class="round hang" title="Sair da sala"></button>
     </nav>
   </main>
+
+  <!-- configurações -->
+  <section id="settings" class="sheet" hidden>
+    <header class="sheet-top"><strong>Configurações</strong><button id="btn-settings-close">Fechar</button></header>
+    <div class="sheet-body">
+      <h3>Voz</h3>
+      <label>Supressão de ruído
+        <select id="s-ns">
+          <option value="standard">Normal (recomendada)</option>
+          <option value="off">Desligada (som original do microfone)</option>
+        </select>
+      </label>
+      <label>Sensibilidade do microfone
+        <select id="s-gate">
+          <option value="off">Desligada (envia tudo)</option>
+          <option value="auto">Automática (acompanha o ruído do ambiente)</option>
+          <option value="manual">Manual (você escolhe o limiar)</option>
+        </select>
+      </label>
+      <div id="s-gate-box" class="gate">
+        <div class="gate-meter"><div id="s-gate-fill" class="gate-fill"></div><div id="s-gate-mark" class="gate-mark"></div></div>
+        <input id="s-gate-db" type="range" min="-80" max="-20" step="1" />
+        <div id="s-gate-note" class="muted"></div>
+      </div>
+      <label>Volume das vozes <span id="s-vol-txt" class="val"></span><input id="s-vol" type="range" min="0" max="1" step="0.05" /></label>
+      <label class="check"><input id="s-sounds" type="checkbox" /> Sons da sala (entrou, saiu, microfone, transmissão)</label>
+      <h3>Transmissões</h3>
+      <label>Qualidade ao assistir
+        <select id="s-quality">
+          <option value="low">Economia (540p · 30 fps)</option>
+          <option value="med">Média (720p · até 60 fps)</option>
+          <option value="high">Máxima</option>
+        </select>
+      </label>
+      <label>Volume da transmissão <span id="s-svol-txt" class="val"></span><input id="s-svol" type="range" min="0" max="1" step="0.05" /></label>
+      <label class="check"><input id="s-bg" type="checkbox" /> Continuar recebendo o vídeo com o app em segundo plano (gasta mais bateria e internet)</label>
+      <h3>Sobre</h3>
+      <p class="muted" id="s-about"></p>
+      <button id="btn-report" class="big">Copiar relatório (para enviar em caso de problema)</button>
+    </div>
+  </section>
+
+  <!-- pessoa -->
+  <section id="person" class="sheet small" hidden>
+    <header class="sheet-top"><strong id="p-name"></strong><button id="btn-person-close">Fechar</button></header>
+    <div class="sheet-body">
+      <p class="muted" id="p-info"></p>
+      <label>Volume para você <span id="p-vol-txt" class="val"></span><input id="p-vol" type="range" min="0" max="1" step="0.05" /></label>
+      <button id="btn-p-mute" class="big"></button>
+    </div>
+  </section>
 
   <div id="toast" hidden></div>
   <script src="app.js"></script>

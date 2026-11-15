@@ -6,9 +6,9 @@ import { Room } from '../renderer/room';
 import { loadIce, normalizeCode } from '../renderer/signaling';
 import { playSfx, type Sfx } from '../renderer/sounds';
 import type { ChatMessage, Quality, RosterEntry, Settings } from '../renderer/types';
-import { Voice } from '../renderer/voice';
+import { GATE_MAX_DB, GATE_MIN_DB, loadVoicePrefs, Voice, type GateMode, type NsMode, type VoicePrefs } from '../renderer/voice';
 import { Watch } from '../renderer/watch';
-import { callStart, callStop, deviceStatus, native, setSpeaker } from './native';
+import { callStart, callStop, deviceStatus, keepScreenOn, native, setSpeaker } from './native';
 
 declare const __VERSION__: string;
 const VERSION = `${__VERSION__}-android`;
@@ -28,6 +28,7 @@ const ICON = {
   speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
   earpiece: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 5.5h3"/>',
   chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   hangup: '<path d="M3 14.5c5-5 13-5 18 0l-2.6 2.6-3.4-1.8v-2.6a10 10 0 0 0-6 0v2.6l-3.4 1.8z"/>',
 };
 
@@ -51,6 +52,34 @@ const store = {
   },
   set quality(v: Quality) {
     localStorage.setItem('ariranhacast.quality', v);
+  },
+  get streamVolume(): number {
+    const v = Number(localStorage.getItem('ariranhacast.svol') ?? '1');
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+  },
+  set streamVolume(v: number) {
+    localStorage.setItem('ariranhacast.svol', String(v));
+  },
+  get bgVideo(): boolean {
+    return localStorage.getItem('ariranhacast.bgvideo') === '1';
+  },
+  set bgVideo(v: boolean) {
+    localStorage.setItem('ariranhacast.bgvideo', v ? '1' : '0');
+  },
+  /** Volume que você deu a cada pessoa (pelo nome, que é o que se mantém entre as salas). */
+  volumes(): Record<string, number> {
+    try {
+      const o = JSON.parse(localStorage.getItem('ariranhacast.volumes') ?? '{}');
+      return o && typeof o === 'object' ? o : {};
+    } catch {
+      return {};
+    }
+  },
+  setVolume(name: string, v: number): void {
+    const o = this.volumes();
+    if (v === 1) delete o[name];
+    else o[name] = v;
+    localStorage.setItem('ariranhacast.volumes', JSON.stringify(o));
   },
   recent(): { code: string; at: number }[] {
     try {
@@ -226,6 +255,9 @@ async function enter(create: boolean, code?: string, password = ''): Promise<voi
   };
   r.onhistory = renderChat;
   r.onchatdel = (id) => document.querySelector(`#msgs li[data-id="${CSS.escape(id)}"]`)?.remove();
+  personEls.clear();
+  appliedVol.clear();
+  $('people').replaceChildren();
   $('btn-code').textContent = r.code;
   $('room-status').textContent = '';
   show('room');
@@ -259,6 +291,7 @@ function leave(reason?: string): void {
   unread = 0;
   renderBadge();
   $('chat').hidden = true;
+  $('person').hidden = true;
   $('msgs').replaceChildren();
   void callStop();
   renderHome();
@@ -312,35 +345,103 @@ function syncVoiceState(): void {
   room.setState(st);
 }
 
+// A lista é atualizada no lugar (só o que mudou), não recriada: o indicador de fala muda
+// várias vezes por segundo e recriar tudo a cada vez gasta bateria à toa.
+const personEls = new Map<string, { li: HTMLLIElement; name: HTMLElement; small: HTMLElement; icons: HTMLElement; key: string }>();
 function renderPeople(): void {
   if (!room || !voice) return;
   const rows = new Map(voice.rows().map((r) => [r.self ? room!.selfId : r.id, r]));
   const list = $('people');
-  list.replaceChildren();
   $('count').textContent = `(${room.roster.length})`;
-  for (const p of room.roster) {
-    const self = p.id === room.selfId;
+  const vols = store.volumes();
+  const seen = new Set<string>();
+  room.roster.forEach((p, i) => {
+    seen.add(p.id);
+    const self = p.id === room!.selfId;
     const r = rows.get(p.id);
-    const li = el('li');
-    li.classList.toggle('speaking', !!r?.speaking);
-    const av = el('div', 'avatar', p.name.trim().charAt(0).toUpperCase() || '?');
-    av.style.background = color(p.id);
-    const who = el('div', 'who', self ? `${p.name} (você)` : p.name);
+    let e = personEls.get(p.id);
+    if (!e) {
+      const li = el('li', self ? 'self' : '');
+      const av = el('div', 'avatar', p.name.trim().charAt(0).toUpperCase() || '?');
+      av.style.background = color(p.id);
+      const who = el('div', 'who');
+      const name = el('span');
+      const small = el('small');
+      who.append(name, small);
+      const icons = el('div', 'icons');
+      li.append(av, who, icons);
+      if (!self) li.onclick = () => openPerson(p.id);
+      e = { li, name, small, icons, key: '' };
+      personEls.set(p.id, e);
+    }
+    if (list.children[i] !== e.li) list.insertBefore(e.li, list.children[i] ?? null);
+    e.li.classList.toggle('speaking', !!r?.speaking);
+    const muted = self ? !voice!.micOn : p.muted;
+    const deaf = self ? voice!.deafened : p.deaf;
+    const vol = self ? 1 : (r?.volume ?? 1);
     const detail = self
-      ? voice.micError || ''
+      ? voice!.micError || ''
       : !r?.connected
         ? 'conectando…'
-        : [r.link ? `${r.link.rttMs} ms` : '', r.turn ? 'via TURN' : '', p.id === room.hostId ? 'hospeda a sala' : ''].filter(Boolean).join(' · ');
-    if (detail) who.append(el('small', '', detail));
-    const icons = el('div', 'icons');
-    const muted = self ? !voice.micOn : p.muted;
-    const deaf = self ? voice.deafened : p.deaf;
-    if (muted) icons.insertAdjacentHTML('beforeend', `<span title="Microfone desligado">${svg(ICON.mic + SLASH)}</span>`);
-    if (deaf) icons.insertAdjacentHTML('beforeend', `<span title="Não está ouvindo">${svg(ICON.headset + SLASH)}</span>`);
-    li.append(av, who, icons);
-    list.append(li);
+        : [r.link ? `${r.link.rttMs} ms` : '', r.turn ? 'via TURN' : '', p.id === room!.hostId ? 'hospeda a sala' : '', vol === 0 ? 'silenciado para você' : vol < 1 ? `volume ${Math.round(vol * 100)}%` : ''].filter(Boolean).join(' · ');
+    const key = `${p.name}|${detail}|${muted}|${deaf}`;
+    if (key === e.key) return;
+    e.key = key;
+    e.name.textContent = self ? `${p.name} (você)` : p.name;
+    e.small.textContent = detail;
+    e.small.hidden = !detail;
+    e.icons.innerHTML =
+      (muted ? `<span title="Microfone desligado">${svg(ICON.mic + SLASH)}</span>` : '') + (deaf ? `<span title="Não está ouvindo">${svg(ICON.headset + SLASH)}</span>` : '');
+    // volume salvo para esta pessoa (vale ao reencontrá-la em outra sala)
+    if (!self && r && vols[p.name] !== undefined && r.volume === 1 && !appliedVol.has(p.id)) {
+      appliedVol.add(p.id);
+      voice!.setVolume(p.id, vols[p.name]);
+    }
+  });
+  for (const [id, e] of personEls) {
+    if (seen.has(id)) continue;
+    e.li.remove();
+    personEls.delete(id);
+    appliedVol.delete(id);
   }
 }
+const appliedVol = new Set<string>();
+
+// ---------- pessoa (volume só para você) ----------
+let personId = '';
+function openPerson(id: string): void {
+  const p = room?.roster.find((x) => x.id === id);
+  const r = voice?.rows().find((x) => x.id === id);
+  if (!p || !voice) return;
+  personId = id;
+  $('p-name').textContent = p.name;
+  $('p-info').textContent = r?.link ? `Ping ${r.link.rttMs} ms · perda ${r.link.lossPct.toFixed(1)}% · ${r.turn ? 'via TURN' : 'conexão direta'}` : r?.connected ? '' : 'Conectando…';
+  const vol = r?.volume ?? 1;
+  $<HTMLInputElement>('p-vol').value = String(vol);
+  syncPerson(vol);
+  $('person').hidden = false;
+}
+function syncPerson(vol: number): void {
+  $('p-vol-txt').textContent = `${Math.round(vol * 100)}%`;
+  $('btn-p-mute').textContent = vol === 0 ? 'Voltar a ouvir' : 'Silenciar só para mim';
+}
+function setPersonVolume(vol: number): void {
+  const p = room?.roster.find((x) => x.id === personId);
+  if (!p || !voice) return;
+  voice.setVolume(personId, vol);
+  store.setVolume(p.name, vol);
+  appliedVol.add(personId);
+  syncPerson(vol);
+  renderPeople();
+}
+$<HTMLInputElement>('p-vol').oninput = () => setPersonVolume(Number($<HTMLInputElement>('p-vol').value));
+$('btn-p-mute').onclick = () => {
+  const now = Number($<HTMLInputElement>('p-vol').value);
+  const next = now === 0 ? 1 : 0;
+  $<HTMLInputElement>('p-vol').value = String(next);
+  setPersonVolume(next);
+};
+$('btn-person-close').onclick = () => ($('person').hidden = true);
 
 // ---------- barra ----------
 function renderBar(): void {
@@ -417,6 +518,8 @@ function startWatch(id: string): void {
   w.onstream = (stream) => {
     const v = $<HTMLVideoElement>('video');
     v.srcObject = stream;
+    v.volume = store.streamVolume;
+    keepScreenOn(true);
     void v.play().catch(() => {});
     w.setQuality(store.quality); // o canal com quem transmite já está aberto
   };
@@ -448,6 +551,7 @@ function stopWatch(): void {
   watchingId = '';
   const v = $<HTMLVideoElement>('video');
   v.srcObject = null;
+  keepScreenOn(false);
   $('viewer').hidden = true;
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   renderStreams();
@@ -488,7 +592,7 @@ $('viewer').onclick = () => {
 document.addEventListener('visibilitychange', () => {
   if (!room) return;
   if (document.hidden) {
-    if (watch) stopWatch();
+    if (watch && !store.bgVideo) stopWatch();
   } else if (wantWatch && !watch) {
     startWatch(wantWatch);
   }
@@ -564,7 +668,9 @@ $('chat-input').oninput = () => room?.sendTyping();
 
 // Botão "voltar" do Android: fecha o chat / sai da tela cheia antes de qualquer outra coisa.
 window.addEventListener('popstate', () => {
-  if (!$('chat').hidden) $('chat').hidden = true;
+  if (!$('person').hidden) $('person').hidden = true;
+  else if (!$('settings').hidden) closeSettings();
+  else if (!$('chat').hidden) $('chat').hidden = true;
   history.pushState(null, '', location.href);
 });
 history.pushState(null, '', location.href);
@@ -573,6 +679,125 @@ window.addEventListener('beforeunload', () => {
   room?.leave();
   void callStop();
 });
+
+// ---------- configurações ----------
+// Fora da sala as preferências de voz são lidas e gravadas direto (o Voice as lê ao entrar);
+// dentro da sala passam pelo Voice, que aplica na hora.
+function vprefs(): VoicePrefs {
+  return voice?.prefs ?? loadVoicePrefs();
+}
+function vstore(patch: Partial<VoicePrefs>): void {
+  localStorage.setItem('ariranhacast.voice', JSON.stringify({ ...loadVoicePrefs(), ...patch }));
+}
+let gateTimer = 0;
+function openSettings(): void {
+  const p = vprefs();
+  $<HTMLSelectElement>('s-ns').value = p.mode === 'off' ? 'off' : 'standard';
+  $<HTMLSelectElement>('s-gate').value = p.gate;
+  $<HTMLInputElement>('s-gate-db').value = String(p.gateDb);
+  $<HTMLInputElement>('s-vol').value = String(p.volume);
+  $<HTMLInputElement>('s-sounds').checked = p.sounds;
+  $<HTMLSelectElement>('s-quality').value = store.quality;
+  $<HTMLInputElement>('s-svol').value = String(store.streamVolume);
+  $<HTMLInputElement>('s-bg').checked = store.bgVideo;
+  void deviceStatus().then((d) => ($('s-about').textContent = `AriranhaCast ${VERSION}${d.model ? ` · ${d.model}` : ''}${d.sdk ? ` · Android API ${d.sdk}` : ''}`));
+  syncSettings();
+  $('settings').hidden = false;
+  clearInterval(gateTimer);
+  gateTimer = window.setInterval(drawGate, 60);
+}
+function closeSettings(): void {
+  clearInterval(gateTimer);
+  $('settings').hidden = true;
+}
+function syncSettings(): void {
+  const p = vprefs();
+  $('s-gate-box').hidden = p.gate === 'off';
+  $('s-gate-db').hidden = p.gate !== 'manual';
+  $('s-vol-txt').textContent = `${Math.round(p.volume * 100)}%`;
+  $('s-svol-txt').textContent = `${Math.round(store.streamVolume * 100)}%`;
+}
+const pct = (db: number): number => Math.max(0, Math.min(100, ((db - GATE_MIN_DB) / (GATE_MAX_DB - GATE_MIN_DB)) * 100));
+function drawGate(): void {
+  if ($('s-gate-box').hidden) return;
+  const live = !!voice && voice.micOn;
+  const thr = live ? voice!.gateThreshold() : vprefs().gateDb;
+  $('s-gate-mark').style.left = `${pct(thr)}%`;
+  $('s-gate-mark').hidden = !live && vprefs().gate !== 'manual';
+  $('s-gate-fill').style.width = live ? `${pct(voice!.selfDb())}%` : '0%';
+  $('s-gate-fill').classList.toggle('open', live && voice!.gateIsOpen);
+  $('s-gate-note').textContent = live
+    ? 'Barra = seu microfone agora; risco = limiar. Verde: a sala ouve. Cinza: abaixo do limiar, não é enviado.'
+    : 'Dentro de uma sala, com o microfone ligado, a barra mostra o nível ao vivo.';
+}
+$('btn-gear-home').innerHTML = svg(ICON.gear);
+$('btn-gear-room').innerHTML = svg(ICON.gear);
+$('btn-gear-home').onclick = openSettings;
+$('btn-gear-room').onclick = openSettings;
+$('btn-settings-close').onclick = closeSettings;
+$<HTMLSelectElement>('s-ns').onchange = () => {
+  const mode = $<HTMLSelectElement>('s-ns').value as NsMode;
+  if (voice) void voice.setMode(mode);
+  else vstore({ mode });
+};
+$<HTMLSelectElement>('s-gate').onchange = () => {
+  const gate = $<HTMLSelectElement>('s-gate').value as GateMode;
+  if (voice) voice.setGateMode(gate);
+  else vstore({ gate });
+  syncSettings();
+};
+$<HTMLInputElement>('s-gate-db').oninput = () => {
+  const db = Number($<HTMLInputElement>('s-gate-db').value);
+  if (voice) voice.setGateDb(db);
+  else vstore({ gateDb: db });
+};
+$<HTMLInputElement>('s-vol').oninput = () => {
+  const v = Number($<HTMLInputElement>('s-vol').value);
+  if (voice) voice.setMasterVolume(v);
+  else vstore({ volume: v });
+  syncSettings();
+};
+$<HTMLInputElement>('s-sounds').onchange = () => {
+  const on = $<HTMLInputElement>('s-sounds').checked;
+  if (voice) voice.setSounds(on);
+  else vstore({ sounds: on });
+};
+$<HTMLSelectElement>('s-quality').onchange = () => {
+  store.quality = $<HTMLSelectElement>('s-quality').value as Quality;
+  $<HTMLSelectElement>('quality').value = store.quality;
+  watch?.setQuality(store.quality);
+};
+$<HTMLInputElement>('s-svol').oninput = () => {
+  store.streamVolume = Number($<HTMLInputElement>('s-svol').value);
+  $<HTMLVideoElement>('video').volume = store.streamVolume;
+  syncSettings();
+};
+$<HTMLInputElement>('s-bg').onchange = () => (store.bgVideo = $<HTMLInputElement>('s-bg').checked);
+
+// Relatório para colar numa conversa quando algo der errado (sem dados pessoais além dos nomes da sala).
+$('btn-report').onclick = async () => {
+  const d = await deviceStatus();
+  const lines = [`AriranhaCast ${VERSION} · ${d.model} · API ${d.sdk} · ${navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0] ?? ''}`];
+  if (room && voice) {
+    lines.push(`Sala ${room.code} · ${room.roster.length} pessoas · ${room.isHost ? 'hospedando' : 'convidado'}`);
+    lines.push(`Microfone: ${voice.micOn ? 'ligado' : 'desligado'}${voice.micError ? ` (${voice.micError})` : ''} · supressão ${voice.prefs.mode} · sensibilidade ${voice.prefs.gate}`);
+    for (const r of voice.rows()) {
+      if (r.self) continue;
+      lines.push(`- ${r.name}: ${r.connected ? 'conectado' : 'conectando'}${r.link ? ` · ${r.link.rttMs} ms · perda ${r.link.lossPct.toFixed(1)}% · jitter ${r.link.jitterMs.toFixed(0)} ms` : ''}${r.turn ? ' · TURN' : ''}`);
+    }
+    if (watch) {
+      const s = await watch.stats();
+      if (s) lines.push(`Assistindo: ${s.width}x${s.height} · ${Math.round(s.fps)} fps · ${s.codec} · ${(s.kbps / 1000).toFixed(1)} Mbps · ${watch.via}${s.turn ? ' · TURN' : ''} · decodificador ${s.decoder || '?'} · ${s.rttMs} ms · buffer ${s.bufferMs} ms · pacotes perdidos ${s.lost} · quadros descartados ${s.dropped}`);
+    }
+  } else lines.push('Fora de sala.');
+  const text = lines.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Relatório copiado. Cole na conversa.');
+  } catch {
+    toast(text, 10000);
+  }
+};
 
 renderHome();
 renderBar();

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
+import android.view.WindowManager;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
@@ -57,6 +58,17 @@ public class CallPlugin extends Plugin {
         r.put("ok", ok);
         r.put("headset", hasHeadset());
         call.resolve(r);
+    }
+
+    /** Mantém a tela acesa (enquanto assiste a uma transmissão). */
+    @PluginMethod
+    public void keepScreenOn(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        getActivity().runOnUiThread(() -> {
+            if (on) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+        call.resolve();
     }
 
     @PluginMethod
