@@ -1,5 +1,5 @@
 import type { DataConnection } from 'peerjs';
-import { pickCodec } from './codecs';
+import { leafCodec, pickCodec } from './codecs';
 import { Outgoing, type OutStats } from './link';
 import { iceServers } from './signaling';
 import type { EncodeOpts, Msg, Quality, Settings } from './types';
@@ -15,6 +15,7 @@ interface Viewer {
   out?: Outgoing;
   receiving: boolean;
   bad: Set<string>; // relays que não conseguiram conexão com este espectador
+  leaf: boolean; // celular: só assiste (nunca repassa a outros) e recebe sempre em H.264
   stats?: OutStats | null;
   deadSince?: number;
   quality: Quality;
@@ -61,6 +62,7 @@ export class Broadcast {
       parent: null,
       receiving: false,
       bad: new Set(),
+      leaf: (conn.metadata as { leaf?: unknown } | undefined)?.leaf === true,
       quality: 'high',
     };
     const begin = () => {
@@ -113,7 +115,7 @@ export class Broadcast {
     let parent = HOST;
     if (this.childrenOf(HOST).filter((x) => x !== v).length >= this.maxDirect) {
       const relays = this.childrenOf(HOST)
-        .filter((r) => r !== v && r.receiving && !v.bad.has(r.id))
+        .filter((r) => r !== v && !r.leaf && r.receiving && !v.bad.has(r.id))
         .map((r) => ({ r, load: this.childrenOf(r.id).filter((x) => x !== v).length }))
         .filter((x) => x.load < this.maxPerRelay)
         .sort((a, b) => a.load - b.load);
@@ -126,7 +128,8 @@ export class Broadcast {
     v.parent = parent;
     this.sendTo(v, { t: 'assign', parent, opts: this.opts, title: this.title });
     if (parent === HOST) {
-      v.out = new Outgoing(this.stream, (m) => this.sendTo(v, m), this.opts, iceServers(this.settings), this.codecMime);
+      // Celular: H.264, que praticamente todo aparelho decodifica por hardware.
+      v.out = new Outgoing(this.stream, (m) => this.sendTo(v, m), this.opts, iceServers(this.settings), v.leaf ? leafCodec(this.codecMime) : this.codecMime);
       void v.out.setQuality(v.quality);
       v.out.onstate = (state) => {
         if (state === 'failed') this.onerror(`Sem rota de rede até ${v.name} (NAT restrito). Um servidor TURN resolve.`);
@@ -173,7 +176,7 @@ export class Broadcast {
     const excess = [...direct].reverse().find((v) => v.receiving && this.childrenOf(v.id).length === 0);
     if (!excess) return;
     const relayReady = direct.some(
-      (r) => r !== excess && r.receiving && !excess.bad.has(r.id) && this.childrenOf(r.id).length < this.maxPerRelay,
+      (r) => r !== excess && !r.leaf && r.receiving && !excess.bad.has(r.id) && this.childrenOf(r.id).length < this.maxPerRelay,
     );
     if (!relayReady) return;
     this.lastRebalance = Date.now();

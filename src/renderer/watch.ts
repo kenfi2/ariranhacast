@@ -1,6 +1,6 @@
 import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
-import { pickCodec } from './codecs';
+import { leafCodec, pickCodec } from './codecs';
 import { Incoming, Outgoing, type InStats } from './link';
 import { iceServers } from './signaling';
 import type { EncodeOpts, Msg, Quality, Settings } from './types';
@@ -39,13 +39,14 @@ export class Watch {
     private settings: Settings,
     readonly pub: string, // id de quem transmite
     private allow: (id: string) => boolean, // o id pertence a alguém da sala?
+    private leaf = false, // celular: só assiste, nunca repassa, e pede H.264
   ) {}
 
   start(): void {
     this.onstatus('Conectando à transmissão…');
     this.control = this.peer.connect(this.pub, {
       reliable: true,
-      metadata: { role: 'watch' },
+      metadata: { role: 'watch', leaf: this.leaf },
     });
     const opened = window.setTimeout(() => {
       if (!this.control.open) this.finish('Não foi possível conectar à transmissão.');
@@ -92,7 +93,7 @@ export class Watch {
       this.parent = '';
       return this.reportBadParent(parent);
     } else {
-      const conn = this.peer.connect(parent, { reliable: true, metadata: { role: 'relay', pub: this.pub } });
+      const conn = this.peer.connect(parent, { reliable: true, metadata: { role: 'relay', pub: this.pub, leaf: this.leaf } });
       this.parentConn = conn;
       conn.on('data', (d) => void this.incoming?.handle(d as Msg));
       conn.on('close', () => this.parentConn === conn && this.reportBadParent());
@@ -161,7 +162,9 @@ export class Watch {
     const stream = this.stream;
     const opts: EncodeOpts = { ...this.opts, codec: 'auto' };
     const vs = stream.getVideoTracks()[0]?.getSettings() ?? {};
-    const mime = await pickCodec(opts, vs.width ?? 1920, vs.height ?? 1080);
+    if (this.leaf) return conn.close(); // celular não repassa
+    const picked = await pickCodec(opts, vs.width ?? 1920, vs.height ?? 1080);
+    const mime = (conn.metadata as { leaf?: unknown } | undefined)?.leaf === true ? leafCodec(picked) : picked;
     const begin = () => {
       const out = new Outgoing(stream, (m) => conn.open && conn.send(m), opts, iceServers(this.settings), mime);
       this.children.set(conn.peer, { conn, out });

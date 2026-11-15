@@ -93,3 +93,67 @@ jobs:
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AriranhaCast $VERSION" --generate-notes $files
           fi
+
+  # App Android (protótipo): gera o APK e anexa à release da versão atual.
+  android:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Dependências
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm ci --prefix mobile
+
+      - name: Página do app
+        run: |
+          npm --prefix mobile run typecheck
+          node scripts/build-mobile.mjs
+          cd mobile && npx cap sync android
+
+      - name: Chave de assinatura (segredo ANDROID_KEYSTORE_B64, se existir)
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Sem o segredo ANDROID_KEYSTORE_B64: o APK sai assinado com uma chave de depuração (cada versão precisa desinstalar a anterior)."
+          fi
+
+      - name: APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          v=$(node -p "require('./package.json').version")
+          IFS=. read -r a b c <<< "$v"
+          export ANDROID_VERSION_NAME="$v" ANDROID_VERSION_CODE=$((a * 10000 + b * 100 + c))
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/AriranhaCast-Android-$v.apk"
+          echo "APK=AriranhaCast-Android-$v.apk" >> "$GITHUB_ENV"
+          echo "TAG=v$v" >> "$GITHUB_ENV"
+
+      - name: Anexar à release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$APK"

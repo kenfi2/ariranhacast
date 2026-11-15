@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "baseUrl": ".",
+    "paths": { "@capacitor/core": ["node_modules/@capacitor/core"] }
+  },
+  "include": ["../src/mobile"],
+  "exclude": []
+}

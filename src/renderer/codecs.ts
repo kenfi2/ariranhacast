@@ -45,6 +45,11 @@ export async function pickCodec(opts: EncodeOpts, width: number, height: number)
   return MIME.VP8;
 }
 
+/** Codec para quem assiste pelo celular: H.264 se este PC souber enviar; senão, o já escolhido. */
+export function leafCodec(fallback: string): string {
+  return sendCodecs().some((c) => c.mimeType.toLowerCase() === 'video/h264') ? MIME.H264 : fallback;
+}
+
 /** Coloca o codec escolhido em primeiro; os demais ficam como fallback de negociação. */
 export function preferCodec(transceiver: RTCRtpTransceiver, mime: string): void {
   const order = (codecs: RTCRtpCodec[]): RTCRtpCodec[] => {

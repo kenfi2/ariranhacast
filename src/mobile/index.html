@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src 'self' https: wss: http://127.0.0.1:* ws://127.0.0.1:*; worker-src 'self' blob:" />
+  <title>AriranhaCast</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- início -->
+  <main id="home">
+    <div class="hero">
+      <img src="icon.png" alt="" class="hero-logo" />
+      <h1>AriranhaCast</h1>
+      <p class="muted" id="version"></p>
+    </div>
+    <label>Seu nome<input id="name" maxlength="24" autocomplete="off" /></label>
+    <form id="join-form">
+      <label>Código da sala<input id="code" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" /></label>
+      <label id="pass-label" hidden>Senha da sala<input id="pass" type="password" maxlength="64" /></label>
+      <button class="primary big" type="submit">Entrar</button>
+    </form>
+    <button id="btn-create" class="big">Criar sala</button>
+    <ul id="recent"></ul>
+    <details>
+      <summary>Avançado</summary>
+      <label>Servidor TURN (opcional: JSON ou URL https://)<textarea id="ice" rows="3" spellcheck="false"></textarea></label>
+      <p class="muted">Normalmente não precisa: quem cria a sala no PC já repassa o TURN dela para você.</p>
+    </details>
+  </main>
+
+  <!-- conectando -->
+  <main id="connecting" hidden>
+    <div class="spinner"></div>
+    <p id="connecting-text">Conectando…</p>
+    <button id="btn-cancel">Cancelar</button>
+  </main>
+
+  <!-- sala -->
+  <main id="room" hidden>
+    <header class="room-top">
+      <button id="btn-code" class="code" title="Compartilhar código"></button>
+      <span id="room-status" class="muted"></span>
+    </header>
+    <section id="viewer" hidden>
+      <video id="video" autoplay playsinline></video>
+      <div id="viewer-status"></div>
+      <div class="viewer-tools">
+        <select id="quality">
+          <option value="low">Economia (540p · 30 fps)</option>
+          <option value="med">Média (720p · até 60 fps)</option>
+          <option value="high">Máxima</option>
+        </select>
+        <button id="btn-full">Tela cheia</button>
+        <button id="btn-stopwatch">Parar</button>
+      </div>
+    </section>
+    <div class="scroll">
+      <section id="streams-box" hidden>
+        <h3>Transmitindo agora</h3>
+        <ul id="streams"></ul>
+      </section>
+      <h3>Na sala <span id="count"></span></h3>
+      <ul id="people"></ul>
+    </div>
+    <!-- chat -->
+    <section id="chat" hidden>
+      <header class="chat-top"><strong>Chat</strong><button id="btn-chat-close">Fechar</button></header>
+      <ul id="msgs"></ul>
+      <form id="chat-form"><input id="chat-input" maxlength="2000" autocomplete="off" placeholder="Mensagem" /><button class="primary">Enviar</button></form>
+    </section>
+    <nav class="bar">
+      <button id="btn-mic" class="round" title="Microfone"></button>
+      <button id="btn-deaf" class="round" title="Ouvir as vozes"></button>
+      <button id="btn-speaker" class="round" title="Alto-falante"></button>
+      <button id="btn-chat" class="round" title="Chat"><span id="chat-badge" hidden></span></button>
+      <button id="btn-leave" class="round hang" title="Sair da sala"></button>
+    </nav>
+  </main>
+
+  <div id="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
