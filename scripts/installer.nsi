@@ -76,14 +76,115 @@ Function CheckSpace
   ${EndIf}
 FunctionEnd
 
+Var Stage   ; pasta onde a versão nova é copiada antes da troca
+Var Backup  ; versão anterior, guardada até a troca terminar
+Var Swapped ; 1 = a versão anterior já saiu do lugar e a nova ainda não entrou
+
+; Desfaz o que estiver pela metade, deixando a versão anterior no lugar.
+Function Rollback
+  SetOutPath "$TEMP"
+  ${If} $Swapped == 1
+    ${IfNot} ${FileExists} "$INSTDIR\${EXE}"
+      RMDir /r "$INSTDIR"
+      Rename "$Backup" "$INSTDIR"
+    ${EndIf}
+    StrCpy $Swapped 0
+  ${EndIf}
+  ${If} $Stage != ""
+    RMDir /r "$Stage"
+  ${EndIf}
+FunctionEnd
+
+; Falha: volta ao estado anterior, avisa (se houver janela) e encerra.
+!macro Fail MSG
+  Call Rollback
+  ${IfNot} ${Silent}
+    MessageBox MB_OK|MB_ICONSTOP "${MSG}$\r$\n$\r$\nA versão que já estava instalada foi mantida."
+  ${EndIf}
+  Abort
+!macroend
+
+; A cópia nova está inteira? (o executável tem o tamanho certo e o código do app está lá)
+Function VerifyStage
+  StrCpy $R9 "ok"
+  ${IfNot} ${FileExists} "$Stage\resources\app\dist\main.js"
+    StrCpy $R9 "faltam arquivos"
+  ${EndIf}
+  !ifdef EXESIZE
+    ClearErrors
+    FileOpen $R0 "$Stage\${EXE}" r
+    ${If} ${Errors}
+      StrCpy $R9 "executável ausente"
+    ${Else}
+      FileSeek $R0 0 END $R1
+      FileClose $R0
+      ${If} $R1 != ${EXESIZE}
+        StrCpy $R9 "executável incompleto"
+      ${EndIf}
+    ${EndIf}
+  !endif
+FunctionEnd
+
+; A versão nova é copiada inteira para uma pasta ao lado, conferida, e só então troca de lugar
+; com a anterior. Se qualquer passo falhar, a anterior continua (ou volta) no lugar.
 Section "Install"
+  StrCpy $Stage "$INSTDIR.new"
+  StrCpy $Backup "$INSTDIR.old"
+  StrCpy $Swapped 0
   Call CheckSpace
   Call WaitForApp
-  ; remove os arquivos do app da versão anterior (os dados do usuário ficam em %APPDATA%)
-  RMDir /r "$INSTDIR\resources"
-  SetOutPath "$INSTDIR"
+
+  ; restos de uma tentativa anterior interrompida
+  SetOutPath "$TEMP"
+  RMDir /r "$Stage"
+  ${IfNot} ${FileExists} "$INSTDIR\${EXE}"
+  ${AndIf} ${FileExists} "$Backup\${EXE}"
+    RMDir /r "$INSTDIR"
+    Rename "$Backup" "$INSTDIR"
+  ${EndIf}
+  RMDir /r "$Backup"
+
+  ; 1. copia a versão nova ao lado da instalada
+  ClearErrors
+  SetOutPath "$Stage"
   File /r "${SRC}\*.*"
-  WriteUninstaller "$INSTDIR\Desinstalar ${APP}.exe"
+  WriteUninstaller "$Stage\Desinstalar ${APP}.exe"
+  SetOutPath "$TEMP"
+  ${If} ${Errors}
+    !insertmacro Fail "Não foi possível copiar os arquivos do AriranhaCast (disco cheio ou sem permissão)."
+  ${EndIf}
+
+  ; 2. confere
+  Call VerifyStage
+  ${If} $R9 != "ok"
+    !insertmacro Fail "A cópia da nova versão não ficou completa ($R9)."
+  ${EndIf}
+
+  ; 3. troca: a anterior sai do lugar, a nova entra
+  ${If} ${FileExists} "$INSTDIR\*.*"
+    StrCpy $R1 0
+    ${Do}
+      ClearErrors
+      Rename "$INSTDIR" "$Backup"
+      ${IfNot} ${Errors}
+        ${ExitDo}
+      ${EndIf}
+      IntOp $R1 $R1 + 1
+      ${If} $R1 > 20
+        !insertmacro Fail "Não foi possível substituir a versão instalada: algum arquivo dela está em uso. Feche o AriranhaCast e tente de novo."
+      ${EndIf}
+      Sleep 500
+    ${Loop}
+    StrCpy $Swapped 1
+  ${EndIf}
+  ClearErrors
+  Rename "$Stage" "$INSTDIR"
+  ${If} ${Errors}
+    !insertmacro Fail "Não foi possível colocar a nova versão no lugar."
+  ${EndIf}
+  StrCpy $Swapped 0
+  RMDir /r "$Backup"
+
   CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\${EXE}"
   CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP}"
@@ -108,10 +209,25 @@ Function .onInstSuccess
   ${EndIf}
 FunctionEnd
 
+; A instalação falhou ou foi cancelada: garante a volta ao estado anterior e, na atualização
+; automática (--force-run), reabre a versão que continua instalada.
+Function .onInstFailed
+  Call Rollback
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "--force-run" $R1
+  ${IfNot} ${Errors}
+  ${AndIf} ${FileExists} "$INSTDIR\${EXE}"
+    Exec '"$INSTDIR\${EXE}"'
+  ${EndIf}
+FunctionEnd
+
 Section "Uninstall"
   ; só apaga a pasta se ela for mesmo uma instalação do AriranhaCast
   ${If} ${FileExists} "$INSTDIR\${EXE}"
     RMDir /r "$INSTDIR"
+    RMDir /r "$INSTDIR.new"
+    RMDir /r "$INSTDIR.old"
   ${EndIf}
   Delete "$SMPROGRAMS\${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"

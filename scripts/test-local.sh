@@ -24,7 +24,7 @@ sleep $SECS
 if [ -n "$DROP" ]; then echo "derrubando $DROP"; pkill -f "lc-name=$DROP"; sleep ${DROPWAIT:-15}; fi
 show() { # nome
   echo "== $1"
-  for k in 'broadcast rows' 'watch stats' 'cams' 'voice' 'turn' 'room' 'act' 'watch end'; do grep -a "\[LC\] $k" "$TMP/$1.log" | tail -1; done
+  for k in 'state' 'gate' 'gatepct' 'broadcast rows' 'watch stats' 'cams' 'voice' 'turn' 'room' 'act' 'watch end'; do grep -a "\[LC\] $k" "$TMP/$1.log" | tail -1; done
   grep -aiE 'Uncaught|TypeError|ReferenceError' "$TMP/$1.log" | head -3
 }
 show host; for i in $(seq 1 $N); do show "v$i"; done

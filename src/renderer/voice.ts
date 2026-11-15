@@ -14,7 +14,15 @@ export interface VoicePrefs {
   sinkId: string; // saída das vozes
   streamSinkId: string; // saída do áudio das transmissões
   volume: number; // volume geral das vozes (0..1)
+  gate: GateMode; // sensibilidade do microfone
+  gateDb: number; // limiar manual, em dB (-80..-20)
+  sounds: boolean; // sons de entrar, sair, mutar…
 }
+
+/** off = envia tudo · auto = limiar acompanha o ruído de fundo · manual = limiar fixo */
+export type GateMode = 'off' | 'auto' | 'manual';
+export const GATE_MIN_DB = -80;
+export const GATE_MAX_DB = -20;
 
 export interface VoiceRow {
   id: string;
@@ -24,6 +32,8 @@ export interface VoiceRow {
   speaking: boolean;
   volume: number;
   turn: boolean; // a conexão com este participante passa pelo TURN
+  muted: boolean; // microfone desligado
+  deaf: boolean; // não está ouvindo as vozes
   link?: LinkQuality;
 }
 
@@ -41,6 +51,7 @@ interface Remote {
 
 const SPEAK_DB = -50;
 const SPEAK_HOLD_MS = 350;
+const GATE_HOLD_MS = 450;
 
 export function loadVoicePrefs(): VoicePrefs {
   try {
@@ -51,9 +62,12 @@ export function loadVoicePrefs(): VoicePrefs {
       sinkId: typeof saved.sinkId === 'string' ? saved.sinkId : '',
       streamSinkId: typeof saved.streamSinkId === 'string' ? saved.streamSinkId : '',
       volume: typeof saved.volume === 'number' ? Math.min(1, Math.max(0, saved.volume)) : 1,
+      gate: saved.gate === 'auto' || saved.gate === 'manual' ? saved.gate : 'off',
+      gateDb: typeof saved.gateDb === 'number' ? Math.min(GATE_MAX_DB, Math.max(GATE_MIN_DB, saved.gateDb)) : -50,
+      sounds: saved.sounds !== false,
     };
   } catch {
-    return { mode: 'standard', micId: '', sinkId: '', streamSinkId: '', volume: 1 };
+    return { mode: 'standard', micId: '', sinkId: '', streamSinkId: '', volume: 1, gate: 'off', gateDb: -50, sounds: true };
   }
 }
 
@@ -86,6 +100,12 @@ export class Voice {
   private ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
   private out = this.ctx.createMediaStreamDestination();
   private micGain = this.ctx.createGain(); // microfone já tratado (supressão de ruído)
+  private gateGain = this.ctx.createGain(); // sensibilidade: fecha quando o som fica abaixo do limiar
+  private gateOpen = true;
+  private gateLast = 0; // última vez que o som passou do limiar
+  private noiseDb = -70; // ruído de fundo estimado (modo automático)
+  private gateTimer: number;
+  private gateBuf = new Float32Array(1024);
   private sendGain = this.ctx.createGain(); // 1 = os amigos ouvem · 0 = mudo ou em teste
   private monitorGain = this.ctx.createGain(); // retorno do teste de microfone
   private recDest = this.ctx.createMediaStreamDestination(); // mistura da conversa para o clipe de voz
@@ -106,6 +126,8 @@ export class Voice {
   /** ids cuja conexão de voz passa pelo TURN (atualizado pelo app a partir das estatísticas). */
   turnIds = new Set<string>();
   links = new Map<string, LinkQuality>(); // ping/perda por pessoa (preenchido pelo app)
+  /** mudo/sem ouvir de cada pessoa, como a sala informa (preenchido pelo app). */
+  peerState = new Map<string, { muted: boolean; deaf: boolean }>();
   onchange: () => void = () => {};
 
   constructor(
@@ -114,18 +136,85 @@ export class Voice {
     private allow: (id: string) => boolean, // o id pertence a alguém da sala?
   ) {
     this.selfAnalyser.fftSize = 1024;
-    this.micGain.connect(this.sendGain);
+    this.micGain.connect(this.gateGain);
+    this.gateGain.connect(this.sendGain);
     this.sendGain.connect(this.out);
     this.sendGain.connect(this.recDest);
     this.sendGain.gain.value = 0;
     this.micGain.connect(this.selfAnalyser);
     this.monitorGain.gain.value = 0;
-    this.micGain.connect(this.monitorGain);
+    this.gateGain.connect(this.monitorGain); // o teste já passa pela sensibilidade: você ouve o que a sala ouviria
     this.monitorGain.connect(this.ctx.destination);
     this.applyMonitorSink();
     void this.ctx.resume();
     peer.on('call', (call) => this.onIncoming(call));
     this.timer = window.setInterval(() => this.tick(), 100);
+    this.gateTimer = window.setInterval(() => this.gateTick(), 20);
+  }
+
+  // ---------- sensibilidade do microfone ----------
+  /** Limiar em uso agora, em dB (no automático, acompanha o ruído de fundo). */
+  gateThreshold(): number {
+    if (this.prefs.gate === 'manual') return this.prefs.gateDb;
+    return Math.min(-38, Math.max(-62, this.noiseDb + 9));
+  }
+
+  /** O microfone está passando som para a sala neste instante? */
+  get gateIsOpen(): boolean {
+    return this.gateOpen;
+  }
+
+  /** Nível atual do microfone em dB (antes da sensibilidade). */
+  selfDb(): number {
+    const db = levelDb(this.selfAnalyser, this.gateBuf);
+    return Number.isFinite(db) ? Math.max(-100, db) : -100;
+  }
+
+  private gateTick(): void {
+    const mode = this.prefs.gate;
+    if (mode === 'off' || !this.mic) {
+      if (!this.gateOpen) this.setGate(true);
+      return;
+    }
+    const now = performance.now();
+    const db = this.selfDb();
+    if (mode === 'auto') {
+      // Ruído de fundo: desce rápido para o nível mais baixo visto, sobe bem devagar (≈1,5 dB/s).
+      if (db < this.noiseDb) this.noiseDb += (db - this.noiseDb) * 0.3;
+      else this.noiseDb = Math.min(-40, this.noiseDb + 0.03);
+      this.noiseDb = Math.max(-90, this.noiseDb);
+    }
+    const thr = this.gateThreshold();
+    // Abre no limiar; para fechar exige ficar 3 dB abaixo por um tempo (não corta fim de palavra).
+    if (db >= thr) this.gateLast = now;
+    else if (this.gateOpen && db >= thr - 3) this.gateLast = Math.max(this.gateLast, now - GATE_HOLD_MS / 2);
+    const open = now - this.gateLast < GATE_HOLD_MS;
+    if (open !== this.gateOpen) this.setGate(open);
+  }
+
+  private setGate(open: boolean): void {
+    this.gateOpen = open;
+    const g = this.gateGain.gain;
+    const t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(open ? 1 : 0, t, open ? 0.004 : 0.04); // abre quase na hora, fecha suave
+  }
+
+  setGateMode(mode: GateMode): void {
+    this.prefs.gate = mode;
+    this.gateLast = 0;
+    this.save();
+    if (mode === 'off') this.setGate(true);
+  }
+
+  setGateDb(db: number): void {
+    this.prefs.gateDb = Math.min(GATE_MAX_DB, Math.max(GATE_MIN_DB, db));
+    this.save();
+  }
+
+  setSounds(on: boolean): void {
+    this.prefs.sounds = on;
+    this.save();
   }
 
   // ---------- participantes ----------
@@ -410,7 +499,7 @@ export class Voice {
   private tick(): void {
     const now = Date.now();
     let changed = false;
-    if (this.micOn && levelDb(this.selfAnalyser, this.buf) > SPEAK_DB) this.selfLast = now;
+    if (this.micOn && !this.monitoring && this.gateOpen && levelDb(this.selfAnalyser, this.buf) > SPEAK_DB) this.selfLast = now;
     const self = this.micOn && now - this.selfLast < SPEAK_HOLD_MS;
     if (self !== this.selfSpeaking) {
       this.selfSpeaking = self;
@@ -440,11 +529,12 @@ export class Voice {
 
   rows(): VoiceRow[] {
     const rows: VoiceRow[] = [
-      { id: 'self', name: `${this.selfName} (você)`, self: true, connected: true, speaking: this.selfSpeaking, volume: 1, turn: false },
+      { id: 'self', name: `${this.selfName} (você)`, self: true, connected: true, speaking: this.selfSpeaking, volume: 1, turn: false, muted: !this.micOn, deaf: this.deafened },
     ];
     for (const [id, r] of this.remotes) {
       const connected = r.call?.peerConnection?.connectionState === 'connected';
-      rows.push({ id, name: r.name, self: false, connected, speaking: r.speaking, volume: r.volume, turn: connected && this.turnIds.has(id), link: connected ? this.links.get(id) : undefined });
+      const st = this.peerState.get(id);
+      rows.push({ id, name: r.name, self: false, connected, speaking: r.speaking, volume: r.volume, turn: connected && this.turnIds.has(id), muted: !!st?.muted, deaf: !!st?.deaf, link: connected ? this.links.get(id) : undefined });
     }
     return rows;
   }
@@ -460,6 +550,7 @@ export class Voice {
   close(): void {
     this.closed = true;
     clearInterval(this.timer);
+    clearInterval(this.gateTimer);
     this.closeMic();
     for (const [id, r] of [...this.remotes]) this.drop(id, r);
     void this.ctx.close();

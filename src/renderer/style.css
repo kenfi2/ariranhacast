@@ -254,3 +254,16 @@ img.logo { border-radius: 5px; }
 #dlg-settings { width: min(620px, 92vw); box-sizing: border-box; }
 #dlg-settings form { width: auto; max-height: 82vh; overflow-x: hidden; }
 #dlg-settings section { min-height: 320px; }
+/* mudo / sem ouvir em cada pessoa */
+.tile .mutes { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.tile .mutes span { width: 28px; height: 28px; border-radius: 50%; background: var(--danger); display: grid; place-items: center; }
+.tile .mutes svg { width: 16px; height: 16px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.voice-list li.is-muted .who { color: var(--muted); }
+/* sensibilidade do microfone */
+.gate { margin: -4px 0 12px; }
+.gate-meter { position: relative; height: 10px; border-radius: 5px; background: var(--panel2); overflow: hidden; }
+.gate-fill { height: 100%; width: 0; background: var(--muted); transition: width .05s linear; }
+.gate-fill.open { background: var(--ok); }
+.gate-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
+.gate input[type=range] { padding: 0; margin: 6px 0 0; }
+.gate .muted { margin-top: 6px; }

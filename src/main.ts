@@ -25,6 +25,42 @@ if (profile && /^[\w-]{1,32}$/.test(path.basename(profile))) {
   app.setPath('userData', dev ? path.resolve(profile) : path.join(app.getPath('userData'), 'perfis', path.basename(profile)));
 }
 
+// ---- registro de erros (fica só neste PC; nada é enviado) ----
+// %APPDATA%/AriranhaCast/logs/app.log, com rodízio em 1 MB. Serve para descobrir o que houve
+// quando o app falha no computador de alguém.
+const logDir = (): string => path.join(app.getPath('userData'), 'logs');
+let logBudget = 0;
+let logWindow = 0;
+function writeLog(level: 'info' | 'warn' | 'error', source: string, message: unknown): void {
+  try {
+    const now = Date.now();
+    if (now - logWindow > 60_000) {
+      logWindow = now;
+      logBudget = 0;
+    }
+    if (++logBudget > 120) return; // um erro em laço não pode encher o disco
+    const raw = message instanceof Error ? (message.stack ?? message.message) : String(message);
+    const text = raw
+      .split(os.homedir()).join('~')
+      .replace(/[\r\n]+/g, ' | ')
+      .replace(/[\p{Cc}\p{Cf}]/gu, '')
+      .slice(0, 2000);
+    const dir = logDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'app.log');
+    try {
+      if (fs.statSync(file).size > 1_000_000) fs.renameSync(file, path.join(dir, 'app.old.log'));
+    } catch {
+      /* ainda não existe */
+    }
+    fs.appendFileSync(file, `${new Date(now).toISOString()} [${level}] ${source}: ${text}\n`);
+  } catch {
+    /* sem disco ou sem permissão: segue sem log */
+  }
+}
+process.on('uncaughtException', (e) => writeLog('error', 'main', e));
+process.on('unhandledRejection', (e) => writeLog('error', 'main (promise)', e));
+
 // O caminho crítico (captura, encode, rede) roda em C++ dentro do Chromium/libwebrtc.
 // Estes switches garantem encoder/decoder por hardware e evitam que o Chromium
 // reduza a prioridade do app quando a janela está minimizada ou atrás do jogo.
@@ -557,13 +593,59 @@ function startUpdater(): void {
     autoUpdater.on('update-not-available', () => setUpd({ state: 'uptodate' }));
     autoUpdater.on('download-progress', (p) => setUpd({ state: 'downloading', version: updVersion, percent: Math.max(0, Math.min(100, Math.round(p.percent))) }));
     autoUpdater.on('update-downloaded', (info) => setUpd({ state: 'ready', version: info.version }));
-    autoUpdater.on('error', (e) => setUpd({ state: 'error', message: shortError(e) }));
+    autoUpdater.on('error', (e) => {
+      writeLog('error', 'atualização', e);
+      setUpd({ state: 'error', message: shortError(e) });
+    });
+    autoUpdater.on('update-downloaded', (info) => writeLog('info', 'atualização', `${info.version} baixada`));
     upd = { state: 'uptodate' };
     checkForUpdates();
     setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
   } catch {
     upd = { state: 'disabled', reason: 'portatil' };
   }
+}
+
+/** Registra falhas da janela e, se ela não carregar ou travar de vez, oferece recarregar. */
+let failDialogOpen = false;
+function watchWindow(w: BrowserWindow): void {
+  const offerReload = (what: string): void => {
+    if (failDialogOpen || quitting || w.isDestroyed()) return;
+    failDialogOpen = true;
+    void dialog
+      .showMessageBox(w, {
+        type: 'error',
+        title: 'AriranhaCast',
+        message: `${what}`,
+        detail: 'O erro foi anotado na pasta de logs. Se continuar acontecendo, envie o arquivo app.log para quem cuida do app.',
+        buttons: ['Recarregar', 'Abrir pasta de logs', 'Fechar'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      })
+      .then(({ response }) => {
+        failDialogOpen = false;
+        if (w.isDestroyed()) return;
+        if (response === 1) void shell.openPath(logDir());
+        if (response !== 2) void w.loadFile(INDEX);
+      })
+      .catch(() => (failDialogOpen = false));
+  };
+  w.webContents.on('console-message', (e) => {
+    if (e.level === 'error' && e.message && !e.message.startsWith('Uncaught')) writeLog('error', `janela ${path.basename(e.sourceId || '')}:${e.lineNumber}`, e.message);
+  });
+  w.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return; // -3 = navegação cancelada
+    writeLog('error', 'janela', `não carregou (${code} ${desc}) ${path.basename(url)}`);
+    offerReload('A tela do AriranhaCast não carregou.');
+  });
+  w.webContents.on('render-process-gone', (_e, d) => {
+    if (d.reason === 'clean-exit') return;
+    writeLog('error', 'janela', `processo da janela encerrou: ${d.reason} (código ${d.exitCode})`);
+    offerReload('A janela do AriranhaCast parou de funcionar.');
+  });
+  w.on('unresponsive', () => writeLog('warn', 'janela', 'parou de responder'));
+  w.on('responsive', () => writeLog('info', 'janela', 'voltou a responder'));
 }
 
 function createWindow(): void {
@@ -590,11 +672,12 @@ function createWindow(): void {
   win.removeMenu();
 
   const query: Record<string, string> = {};
-  for (const k of ['auto', 'code', 'fake', 'server', 'maxdirect', 'name', 'mic', 'ns', 'cam', 'ice', 'relayonly', 'netcheck', 'pass', 'act', 'realcap']) {
+  for (const k of ['auto', 'code', 'fake', 'server', 'maxdirect', 'name', 'mic', 'ns', 'cam', 'ice', 'relayonly', 'netcheck', 'pass', 'act', 'realcap', 'gate', 'tab']) {
     const v = arg(k);
     if (v !== undefined) query[k] = v.slice(0, 2000);
   }
   void win.loadFile(INDEX, { query });
+  watchWindow(win);
 
   if (arg('log')) {
     win.webContents.on('console-message', (e) => {
@@ -732,6 +815,11 @@ app.whenReady().then(() => {
     updateOverlay();
   });
   handle('lc:open-external', (url: unknown) => openExternal(url));
+  handle('lc:log', (text: unknown) => writeLog('error', 'janela', String(text ?? '').slice(0, 2000)));
+  handle('lc:open-logs', async () => {
+    fs.mkdirSync(logDir(), { recursive: true });
+    return (await shell.openPath(logDir())) === '';
+  });
   handle('lc:save-clip', (data: unknown, ext: unknown, voice: unknown) => saveClip(data, ext, voice));
   // Windows 10 (build < 22000) sempre desenha a borda amarela ao capturar uma janela.
   handle('lc:yellow-border', () => process.platform === 'win32' && Number(os.release().split('.')[2] ?? 0) < 22000);
@@ -764,6 +852,10 @@ app.whenReady().then(() => {
     overlay.webContents.send('lc:ov-rows', clean);
   });
 
+  writeLog('info', 'main', `AriranhaCast ${app.getVersion()} · Electron ${process.versions.electron} · ${process.platform} ${os.release()} ${process.arch} · livre no disco: ${freeMB() ?? '?'} MB`);
+  app.on('child-process-gone', (_e, d) => {
+    if (d.reason !== 'clean-exit') writeLog('error', 'main', `processo ${d.type}${d.name ? ` (${d.name})` : ''} encerrou: ${d.reason} (código ${d.exitCode})`);
+  });
   createTray();
   createWindow();
   startUpdater();

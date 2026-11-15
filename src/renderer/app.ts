@@ -11,12 +11,17 @@ import type { CodecChoice, EncodeOpts, OverlayRow, Quality, RosterEntry, Setting
 import { Voice, type NsMode } from './voice';
 import { addSticker, listMyEmotes, listStickers } from './library';
 import { mountVoicePanel, mountVoiceSettings } from './voicePanel';
+import { playSfx, type Sfx } from './sounds';
 import { formatBytes, TurnMeter } from './turnmeter';
 import { Watch } from './watch';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
 const testing = params.has('auto');
+
+// Erros inesperados da tela vão para o arquivo de log (Configurações > Rede > Abrir pasta de logs).
+window.addEventListener('error', (e) => void window.ariranhacast.logError(`${e.message} @ ${String(e.filename).split('/').pop()}:${e.lineno}:${e.colno}${e.error?.stack ? ` | ${e.error.stack}` : ''}`));
+window.addEventListener('unhandledrejection', (e) => void window.ariranhacast.logError(`promise: ${e.reason?.stack ?? e.reason}`));
 const log = (...a: unknown[]) => console.log('[LC]', ...a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))));
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] {
@@ -281,22 +286,27 @@ async function applyHotkeys(): Promise<void> {
   if (failed.length) toast(`Atalho indisponível (já usado por outro programa): ${failed.join(', ')}`);
 }
 
-/** Bipe curto ao mudar o microfone/as vozes por atalho, para confirmar sem olhar a janela. */
-function cue(on: boolean): void {
-  try {
-    const ac = new AudioContext();
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.frequency.value = on ? 880 : 440;
-    gain.gain.setValueAtTime(0.08, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.15);
-    osc.connect(gain).connect(ac.destination);
-    osc.start();
-    osc.stop(ac.currentTime + 0.16);
-    osc.onended = () => void ac.close();
-  } catch {
-    /* sem áudio */
-  }
+/** Som curto da sala (entrar, sair, mutar…), pela saída das vozes; desligável em Configurações > Voz. */
+function sfx(kind: Sfx): void {
+  const prefs = voice?.prefs;
+  if (prefs) playSfx(kind, prefs.sounds, prefs.sinkId);
+}
+
+/** Liga/desliga o microfone (botão ou atalho), com som e aviso de erro. */
+async function toggleMic(): Promise<void> {
+  if (!voice) return;
+  const wasDeaf = voice.deafened;
+  await voice.setMic(!voice.micOn);
+  if (voice.micError) toast(voice.micError);
+  else sfx(wasDeaf && !voice.deafened ? 'undeafen' : voice.micOn ? 'unmute' : 'mute');
+  updateControls();
+}
+
+function toggleDeaf(): void {
+  if (!voice) return;
+  voice.setDeafened(!voice.deafened);
+  sfx(voice.deafened ? 'deafen' : 'undeafen');
+  updateControls();
 }
 
 window.ariranhacast.onHotkey(async (which) => {
@@ -304,14 +314,8 @@ window.ariranhacast.onHotkey(async (which) => {
   if (which === 'leave') return leaveRoom();
   if (which === 'clip') return void saveClip();
   if (which === 'voice') return void saveVoiceClip();
-  if (which === 'mic') {
-    await voice.setMic(!voice.micOn);
-    cue(voice.micOn);
-  } else {
-    voice.setDeafened(!voice.deafened);
-    cue(!voice.deafened);
-  }
-  updateControls();
+  if (which === 'mic') await toggleMic();
+  else toggleDeaf();
 });
 
 $('btn-netcheck').onclick = async () => {
@@ -464,6 +468,7 @@ async function enterRoom(create: boolean, code?: string, password = ''): Promise
     updateControls();
   };
   unmountVoice = mountVoicePanel($('voice-box'), voice, () => {
+    syncVoiceState();
     updateSpeaking();
     updateControls();
   });
@@ -514,6 +519,9 @@ async function enterRoom(create: boolean, code?: string, password = ''): Promise
 
 function leaveRoom(reason?: string): void {
   if (!room) return;
+  rosterIds = null;
+  rosterLive = new Set();
+  sentVoiceState = '';
   clearInterval(pollTimer);
   stopShare();
   wantWatch.clear();
@@ -549,8 +557,65 @@ function leaveRoom(reason?: string): void {
   log('room left', reason ?? '');
 }
 
+/** Avisa a sala quando ligamos/desligamos o microfone ou as vozes, e atualiza os ícones. */
+let sentVoiceState = '';
+function syncVoiceState(): void {
+  if (!room || !voice) return;
+  const st = { muted: !voice.micOn, deaf: voice.deafened };
+  const key = `${st.muted}${st.deaf}`;
+  if (key !== sentVoiceState) {
+    sentVoiceState = key;
+    room.setState(st);
+  }
+  updateMutes();
+}
+
+/** Ícones de microfone desligado / sem ouvir em cada pessoa (inclusive em você). */
+function updateMutes(): void {
+  if (!room) return;
+  for (const p of room.roster) {
+    const tile = tiles.get(`user:${p.id}`);
+    if (!tile) continue;
+    const self = p.id === room.selfId;
+    const muted = self ? !voice?.micOn : p.muted;
+    const deaf = self ? !!voice?.deafened : p.deaf;
+    let box = tile.root.querySelector<HTMLElement>('.mutes');
+    if (!box) {
+      box = el('div', 'mutes');
+      tile.root.append(box);
+    }
+    const key = `${muted}${deaf}`;
+    if (box.dataset.key === key) continue;
+    box.dataset.key = key;
+    box.innerHTML = (muted ? `<span title="Microfone desligado">${svg(ICON.mic + SLASH)}</span>` : '') + (deaf ? `<span title="Não está ouvindo as vozes">${svg(ICON.headset + SLASH)}</span>` : '');
+    box.hidden = !muted && !deaf;
+  }
+}
+
+let rosterIds: Set<string> | null = null; // null = acabamos de entrar: não toca som pela lista inicial
+let rosterLive = new Set<string>();
+function rosterSounds(list: RosterEntry[]): void {
+  const me = room?.selfId;
+  const ids = new Set(list.map((p) => p.id));
+  const live = new Set(list.filter((p) => p.screen).map((p) => p.id));
+  if (rosterIds && me && ids.has(me)) {
+    const joined = [...ids].some((id) => id !== me && !rosterIds!.has(id));
+    const left = [...rosterIds].some((id) => id !== me && !ids.has(id));
+    const started = [...live].some((id) => id !== me && !rosterLive.has(id));
+    if (joined) sfx('join');
+    else if (left) sfx('leave');
+    else if (started) sfx('live');
+  }
+  if (me && ids.has(me)) {
+    rosterIds = ids;
+    rosterLive = live;
+  }
+}
+
 function onRoster(list: RosterEntry[]): void {
   if (!room) return;
+  rosterSounds(list);
+  if (voice) voice.peerState = new Map(list.map((p) => [p.id, { muted: p.muted, deaf: p.deaf }]));
   voice?.setRoster(list);
   cams?.setRoster(list);
   for (const id of [...watches.keys()]) {
@@ -623,16 +688,8 @@ function updateControls(): void {
   void window.ariranhacast.setInRoom(!!room, micOn);
 }
 
-$('btn-mic').onclick = async () => {
-  if (!voice) return;
-  await voice.setMic(!voice.micOn);
-  if (voice.micError) toast(voice.micError);
-  updateControls();
-};
-$('btn-deaf').onclick = () => {
-  voice?.setDeafened(!voice.deafened);
-  updateControls();
-};
+$('btn-mic').onclick = () => void toggleMic();
+$('btn-deaf').onclick = () => toggleDeaf();
 $('btn-cam').onclick = async () => {
   if (!cams || !room) return;
   await cams.setCam(!cams.local);
@@ -900,6 +957,7 @@ function renderTiles(): void {
     if (focusKey === key) focusKey = '';
   }
   applyFocus();
+  updateMutes();
   updateSpeaking();
 }
 
@@ -925,7 +983,7 @@ function pushOverlay(): void {
   const speaking = voice.speakingIds();
   const rows: OverlayRow[] = room.roster.map((p) => {
     const self = p.id === room!.selfId;
-    return { name: p.name, color: color(p.id), speaking: speaking.has(self ? 'self' : p.id), muted: self && !voice!.micOn };
+    return { name: p.name, color: color(p.id), speaking: speaking.has(self ? 'self' : p.id), muted: self ? !voice!.micOn : p.muted };
   });
   const key = JSON.stringify(rows);
   if (key === lastOverlay) return;
@@ -1429,7 +1487,7 @@ async function saveClip(): Promise<void> {
     if (!clip) return toast('O replay ainda não tem vídeo suficiente.');
     const r = await window.ariranhacast.saveClip(clip.data, clip.ext);
     if (!r.ok || !r.path) return toast(`Não foi possível salvar o clipe: ${r.error ?? 'erro'}`);
-    cue(true);
+    sfx('saved');
     toast(`Clipe de ${clip.seconds} s salvo em Vídeos/AriranhaCast.`);
     log('clip', `${clip.seconds}s ${clip.ext} ${clip.data.byteLength}`);
     if (!testing) void window.ariranhacast.showClip(r.path);
@@ -1462,7 +1520,7 @@ async function saveVoiceClip(): Promise<void> {
     if (!clip) return toast('O replay de voz ainda não tem áudio suficiente.');
     const r = await window.ariranhacast.saveClip(clip.data, clip.ext, true);
     if (!r.ok || !r.path) return toast(`Não foi possível salvar o clipe de voz: ${r.error ?? 'erro'}`);
-    cue(true);
+    sfx('saved');
     toast(`Clipe de voz de ${clip.seconds} s salvo em Vídeos/AriranhaCast.`);
     log('vclip', `${clip.seconds}s ${clip.ext} ${clip.data.byteLength}`);
     if (!testing) void window.ariranhacast.showClip(r.path);
@@ -1496,6 +1554,9 @@ async function connectionReport(): Promise<string> {
   return lines.join('\n');
 }
 
+$('btn-logs').onclick = async () => {
+  if (!(await window.ariranhacast.openLogs())) toast('Não foi possível abrir a pasta de logs.');
+};
 $('btn-report').onclick = async () => {
   const btn = $<HTMLButtonElement>('btn-report');
   const out = $('netcheck-out');
@@ -1610,6 +1671,19 @@ if (testing) {
             document.querySelector<HTMLElement>('.chat-bar button[title="Figurinhas"]')?.click();
           })();
         }
+        else if (what === 'micoff') $('btn-mic').click();
+        else if (what === 'boom') setTimeout(() => { throw new Error('erro de teste'); }, 0);
+        else if (what === 'deaf') $('btn-deaf').click();
+        else if (what === 'gate') {
+          voice?.setGateMode((params.get('gate') as 'auto' | 'manual') ?? 'auto');
+          const [m1, m2] = (params.get('gate') ?? '').split(':');
+          if (m1 === 'manual') { voice?.setGateMode('manual'); voice?.setGateDb(Number(m2)); }
+          let opens = 0, n = 0;
+          window.setInterval(() => { n++; if (voice?.gateIsOpen) opens++; }, 50);
+          window.setInterval(() => log('gatepct', `open ${Math.round((opens / Math.max(1, n)) * 100)}% thr=${voice?.gateThreshold().toFixed(1)}`), 2000);
+          window.setInterval(() => log('gate', `mode=${voice?.prefs.gate} db=${voice?.selfDb().toFixed(1)} thr=${voice?.gateThreshold().toFixed(1)} open=${voice?.gateIsOpen} speaking=${voice?.speakingIds().has('self')}`), 1000);
+        }
+        else if (what === 'state') log('state', JSON.stringify(cur.roster.map((p) => [p.name, p.muted, p.deaf])), 'icons', document.querySelectorAll('.tile .mutes:not([hidden]) span').length);
         else if (what === 'clip') void saveClip();
         else if (what === 'report') $('btn-report').click();
         else if (what === 'pause') $('btn-pause').click();

@@ -36,4 +36,6 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   pushOverlay: (rows: unknown) => ipcRenderer.send('lc:overlay-rows', rows),
   onDeepLink: (cb: (code: string) => void) => on('lc:deeplink', cb),
   pendingDeepLink: () => ipcRenderer.invoke('lc:deeplink-pending'),
+  logError: (text: string) => ipcRenderer.invoke('lc:log', text),
+  openLogs: () => ipcRenderer.invoke('lc:open-logs'),
 });

@@ -35,6 +35,8 @@ export interface AriranhaBridge {
   pushOverlay(rows: OverlayRow[]): void;
   onDeepLink(cb: (code: string) => void): void;
   pendingDeepLink(): Promise<string>;
+  logError(text: string): Promise<void>;
+  openLogs(): Promise<boolean>;
 }
 
 export interface GifItem {
@@ -93,6 +95,8 @@ export interface RosterEntry {
   cam: boolean;
   screen: boolean;
   title: string; // nome da tela/janela transmitida
+  muted: boolean; // microfone desligado
+  deaf: boolean; // silenciou as vozes (não ouve a sala)
 }
 
 export type Msg =
@@ -115,7 +119,7 @@ export type Msg =
   // sala: funcionamento
   | { t: 'room'; peers: RosterEntry[] }
   | { t: 'ice-config'; servers: RTCIceServer[] }
-  | { t: 'state'; cam: boolean; screen: boolean; title: string }
+  | { t: 'state'; cam: boolean; screen: boolean; title: string; muted?: boolean; deaf?: boolean }
   | { t: 'cmd'; cmd: 'mute' }
   | { t: 'kick' }
   // chat: membro → anfitrião (anfitrião define autor, hora e id) e anfitrião → todos

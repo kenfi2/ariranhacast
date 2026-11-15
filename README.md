@@ -4,6 +4,14 @@ Sala de voz P2P para um grupo pequeno de amigos, com webcam e transmissão de te
 latência. Mesmo pipeline do Discord: WebRTC (libwebrtc do Chromium) sobre UDP, encoder por
 hardware, bitrate adaptativo.
 
+## Novidades da 0.6.0
+
+- **Mudo e "sem ouvir" visíveis**: um ícone vermelho aparece no quadro de cada pessoa (inclusive no seu) quando o microfone está desligado ou as vozes estão silenciadas, e a lista de voz mostra "mudo" / "sem ouvir". O overlay também mostra quem está mudo.
+- **Sons da sala**: alguém entrou ou saiu, microfone ligado/desligado, vozes silenciadas, transmissão começou, clipe salvo. Desligáveis em Configurações > Voz.
+- **Sensibilidade do microfone** (Configurações > Voz): *Automática* (o limiar acompanha o ruído do ambiente) ou *Manual* (você escolhe o limiar, com medidor ao vivo). Sons abaixo do limiar não são enviados. Vem desligada, como era antes.
+- **Registro de erros**: falhas do app ficam anotadas em `%APPDATA%\AriranhaCast\logs\app.log` (só neste PC, nada é enviado). Configurações > Rede > "Abrir pasta de logs". Se a janela não carregar ou travar, o app oferece recarregar.
+- **Instalação que não quebra**: o instalador copia a versão nova para uma pasta ao lado, confere, e só então troca de lugar com a anterior. Se algo falhar no meio (disco cheio, arquivo em uso), a versão anterior continua funcionando.
+
 ## Novidades da 0.5.1
 
 - **Atualização à prova de disco cheio**: o app confere o espaço livre antes de fechar para atualizar (e não instala sozinho ao sair se faltar espaço), e o instalador confere antes de mexer em qualquer arquivo. Antes, ficar sem espaço no meio da cópia deixava o app sem abrir. Se isso já aconteceu: libere espaço e instale de novo por cima; suas configurações e figurinhas não se perdem.

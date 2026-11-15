@@ -41,6 +41,8 @@ function cleanRoster(raw: unknown): RosterEntry[] {
       cam: (p as any).cam === true,
       screen: (p as any).screen === true,
       title: str((p as any).title, 80),
+      muted: (p as any).muted === true,
+      deaf: (p as any).deaf === true,
     });
   }
   return out;
@@ -109,7 +111,7 @@ export class Room {
     private version: string,
     private password = '',
   ) {
-    this.self = { id: '', name: settings.name.slice(0, 24) || 'Convidado', cam: false, screen: false, title: '' };
+    this.self = { id: '', name: settings.name.slice(0, 24) || 'Convidado', cam: false, screen: false, title: '', muted: true, deaf: false };
   }
 
   get selfId(): string {
@@ -257,7 +259,7 @@ export class Room {
         this.members.get(conn.peer)?.conn.close(); // reconexão do mesmo participante
         member = {
           conn,
-          entry: { id: conn.peer, name: str(msg.name, 24) || 'Convidado', cam: false, screen: false, title: '' },
+          entry: { id: conn.peer, name: str(msg.name, 24) || 'Convidado', cam: false, screen: false, title: '', muted: false, deaf: false },
         };
         this.members.set(conn.peer, member);
         this.pending.delete(conn.peer);
@@ -272,6 +274,8 @@ export class Room {
         member.entry.cam = msg.cam === true;
         member.entry.screen = msg.screen === true;
         member.entry.title = str(msg.title, 80);
+        member.entry.muted = msg.muted === true;
+        member.entry.deaf = msg.deaf === true;
         this.publish();
       } else if (msg.t === 'chat') {
         const text = cleanChatText(msg.text).trim();
@@ -656,7 +660,7 @@ export class Room {
   }
 
   /** Avisa a sala do que estamos publicando (webcam, transmissão). */
-  setState(patch: Partial<Pick<RosterEntry, 'cam' | 'screen' | 'title'>>): void {
+  setState(patch: Partial<Pick<RosterEntry, 'cam' | 'screen' | 'title' | 'muted' | 'deaf'>>): void {
     Object.assign(this.self, patch);
     if (this.isHost) this.publish();
     else this.sendState();
@@ -664,7 +668,7 @@ export class Room {
 
   private sendState(): void {
     if (this.control?.open) {
-      this.control.send({ t: 'state', cam: this.self.cam, screen: this.self.screen, title: this.self.title } satisfies Msg);
+      this.control.send({ t: 'state', cam: this.self.cam, screen: this.self.screen, title: this.self.title, muted: this.self.muted, deaf: this.self.deaf } satisfies Msg);
     }
   }
 

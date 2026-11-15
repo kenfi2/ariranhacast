@@ -68,7 +68,7 @@ function dirBytes(dir) {
 }
 const needMb = Math.ceil(dirBytes(appDir) / 1048576) + 64;
 const { bin, env } = findMakensis();
-execFileSync(bin, ['-V2', `-DSRC=${resolve(appDir)}`, `-DOUT=${resolve('release', setup)}`, `-DVERSION=${version}`, `-DNEEDMB=${needMb}`, 'scripts/installer.nsi'], {
+execFileSync(bin, ['-V2', `-DSRC=${resolve(appDir)}`, `-DOUT=${resolve('release', setup)}`, `-DVERSION=${version}`, `-DNEEDMB=${needMb}`, `-DEXESIZE=${statSync(join(appDir, 'AriranhaCast.exe')).size}`, 'scripts/installer.nsi'], {
   stdio: 'inherit',
   env: { ...process.env, ...env },
 });
