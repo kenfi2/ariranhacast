@@ -4,6 +4,19 @@ Sala de voz P2P para um grupo pequeno de amigos, com webcam e transmissão de te
 latência. Mesmo pipeline do Discord: WebRTC (libwebrtc do Chromium) sobre UDP, encoder por
 hardware, bitrate adaptativo.
 
+## Novidades da 0.5.0
+
+- **Teste de microfone com retorno ao vivo** (como no Discord): no painel de voz, "Testar microfone" liga o retorno e você se ouve na hora, com medidor de nível. Enquanto o teste está ligado a sala não te ouve.
+- **Configurações em abas**, com a aba **Voz** (microfone, saídas, supressão de ruído). O painel da sala ficou só com volume, teste e a lista de pessoas.
+- **Figurinhas**: botão 🦦 no chat. Para criar: "+ Nova figurinha" (várias de uma vez), colar/arrastar uma imagem com a aba aberta, ou passar o mouse em qualquer imagem do chat e clicar em "+ Figurinha". Ficam guardadas neste PC (até 200).
+- **Emotes pessoais**: os emotes que você cria ficam guardados e entram sozinhos em toda sala. "Gerenciar" apaga os seus e copia os dos outros.
+- **Clipe de voz**: botão do microfone com ponto (ou Ctrl+Shift+G) salva só o áudio da conversa dos últimos 60–120 s (ajustável) em Vídeos/AriranhaCast.
+- **Verificar atualizações** agora também fica no topo da janela.
+- **Ícone novo.**
+- **Borda amarela**: o app pede ao Windows para não desenhar. No Windows 11 ela some; no Windows 10 o sistema ainda a desenha ao capturar uma *janela* (não a tela inteira), e nenhum app consegue tirar. Quem assiste nunca vê a borda.
+
+Continua compatível com a 0.4.0 (quem estiver na 0.4.0 vê as figurinhas como imagens comuns).
+
 ## Novidades da 0.4.0
 
 - **Chat de texto** na sala: links clicáveis, imagens e GIFs (colar, arrastar ou botão; até 4 MB), emojis, **emotes da sala** (`:nome:`, até 50), `**negrito**`, `*itálico*`, `~~riscado~~`, `` `código` ``, "fulano está digitando", apagar mensagem, aviso de não lidas. Busca de GIFs dentro do app com uma chave gratuita do Giphy (Configurações > Chat).

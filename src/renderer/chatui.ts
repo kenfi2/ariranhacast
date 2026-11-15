@@ -1,8 +1,9 @@
-import { MAX_EMOTE, MAX_IMAGE, MAX_TEXT, sniffImage } from './chatutil';
+import { MAX_IMAGE, MAX_TEXT, sniffImage } from './chatutil';
+import { addSticker, listMyEmotes, listStickers, removeMyEmote, removeSticker, saveMyEmote } from './library';
 import type { Room } from './room';
 import type { ChatImage, ChatMessage, Emote, GifItem } from './types';
 
-/** Chat de texto da sala: links, imagens, GIFs, emojis, emotes da sala e formatação simples. */
+/** Chat de texto da sala: links, imagens, GIFs, figurinhas, emojis, emotes e formatação simples. */
 export interface ChatDeps {
   room: Room;
   color(id: string): string;
@@ -62,11 +63,13 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
   bImg.title = 'Enviar imagem (também dá para colar ou arrastar)';
   const bGif = el('button', 'ghost small', 'GIF');
   bGif.title = 'Procurar GIF';
+  const bStk = el('button', 'ghost small', '🦦');
+  bStk.title = 'Figurinhas';
   const bEmo = el('button', 'ghost small', '😄');
-  bEmo.title = 'Emojis e emotes da sala';
+  bEmo.title = 'Emojis e emotes';
   const bSend = el('button', 'primary small', 'Enviar');
-  for (const b of [bImg, bGif, bEmo, bSend]) b.type = 'button';
-  bar.append(bImg, bGif, bEmo, input, bSend, file);
+  for (const b of [bImg, bGif, bStk, bEmo, bSend]) b.type = 'button';
+  bar.append(bImg, bGif, bStk, bEmo, input, bSend, file);
   root.append(list, typing, preview, picker, bar);
 
   let pendingImg: ChatImage | null = null;
@@ -139,15 +142,23 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
       row.append(body);
     }
     if (m.img) {
-      const img = el('img', 'chat-img');
+      const wrap = el('div', 'chat-imgwrap');
+      const img = el('img', m.sticker ? 'chat-sticker' : 'chat-img');
       const src = blobUrl(m.img);
+      const data = m.img.data;
       img.src = src;
-      img.alt = 'imagem';
-      img.onclick = () => lightbox(src);
+      img.alt = m.sticker ? 'figurinha' : 'imagem';
+      if (!m.sticker) img.onclick = () => lightbox(src);
       img.onload = () => {
         if (stick) list.scrollTop = list.scrollHeight;
       };
-      row.append(img);
+      // Um clique guarda qualquer imagem ou figurinha do chat na sua coleção.
+      const keep = el('button', 'chat-keep', '+ Figurinha');
+      keep.type = 'button';
+      keep.title = 'Guardar nas minhas figurinhas';
+      keep.onclick = () => void keepSticker(data);
+      wrap.append(img, keep);
+      row.append(wrap);
     } else if (m.expired) {
       row.append(el('div', 'chat-expired', '(imagem antiga, não está mais disponível)'));
     }
@@ -217,8 +228,19 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
     return { mime, data };
   }
 
+  async function keepSticker(raw: Uint8Array): Promise<boolean> {
+    const r = await addSticker(raw).catch(() => null);
+    if (r === 'full') return deps.toast('Sua coleção de figurinhas está cheia (200). Apague alguma para guardar outra.'), false;
+    if (!r) return deps.toast('Não deu para usar essa imagem como figurinha (GIF animado precisa ter até 1 MB).'), false;
+    deps.toast('Figurinha guardada.');
+    if (!picker.hidden && picker.dataset.kind === 'sticker') void showStickers();
+    return true;
+  }
+
   async function takeFile(f: Blob | null | undefined): Promise<void> {
     if (!f) return;
+    // Com a aba de figurinhas aberta, colar ou arrastar uma imagem já cria a figurinha.
+    if (!picker.hidden && picker.dataset.kind === 'sticker') return void (await keepSticker(new Uint8Array(await f.arrayBuffer())));
     const img = await prepareImage(f);
     if (img) setPending(img);
     input.focus();
@@ -256,6 +278,14 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
       void takeFile(item.getAsFile());
     }
   };
+  picker.tabIndex = -1;
+  picker.onpaste = (e) => {
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      void takeFile(item.getAsFile());
+    }
+  };
   root.ondragover = (e) => e.preventDefault();
   root.ondrop = (e) => {
     e.preventDefault();
@@ -276,40 +306,98 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
     input.selectionStart = input.selectionEnd = s + text.length;
   }
 
-  function showEmojis(): void {
+  let managing = false;
+
+  /** Põe na sala os emotes da sua coleção (ao entrar e sempre que você cria um). */
+  async function publishMine(): Promise<void> {
+    const mine = await listMyEmotes().catch(() => []);
+    for (const e of mine) {
+      const cur = room.emotes.get(e.name);
+      if (cur) continue; // já está lá (seu ou de outra pessoa com o mesmo nome)
+      room.addEmote(e.name, e.data);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+
+  async function showEmojis(): Promise<void> {
+    const mine = await listMyEmotes().catch(() => []);
+    const mineNames = new Set(mine.map((e) => e.name));
     picker.replaceChildren();
     picker.dataset.kind = 'emoji';
-    const emotes = el('div', 'pick-grid');
-    for (const e of room.emotes.values()) {
-      const b = el('button', 'pick');
-      b.type = 'button';
-      const img = el('img');
-      img.src = blobUrl(e);
-      b.title = `:${e.name}:`;
-      b.append(img);
-      b.onclick = () => insert(`:${e.name}: `);
-      emotes.append(b);
-    }
-    const add = el('button', 'ghost small', '+ Adicionar emote');
+
+    const add = el('button', 'ghost small', '+ Novo emote');
     add.type = 'button';
+    const manage = el('button', 'ghost small', managing ? 'Concluir' : 'Gerenciar');
+    manage.type = 'button';
+    manage.onclick = () => {
+      managing = !managing;
+      void showEmojis();
+    };
     const emoteFile = el('input');
     emoteFile.type = 'file';
     emoteFile.accept = file.accept;
     emoteFile.hidden = true;
     add.onclick = () => emoteFile.click();
-    emoteFile.onchange = async () => {
+    emoteFile.onchange = () => {
       const f = emoteFile.files?.[0];
       emoteFile.value = '';
       if (!f) return;
-      const data = await shrinkEmote(f);
-      if (!data) return deps.toast('Não deu para usar essa imagem como emote (máximo 128 KB; GIF animado precisa já ser pequeno).');
       const suggested = f.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
-      askName(suggested, (name) => {
-        if (!room.addEmote(name, data)) deps.toast('Não foi possível adicionar (nome já usado por outra pessoa, ou a sala já tem 50 emotes).');
+      askName(suggested, async (name) => {
+        const saved = await saveMyEmote(name, new Uint8Array(await f.arrayBuffer())).catch(() => null);
+        if (saved === 'full') return deps.toast('Sua coleção já tem 50 emotes. Apague algum para criar outro.');
+        if (!saved) return deps.toast('Não deu para usar essa imagem como emote (GIF animado precisa ter até 128 KB).');
+        if (!room.addEmote(saved.name, saved.data)) deps.toast('O emote ficou guardado na sua coleção, mas não entrou nesta sala (nome já usado por outra pessoa, ou a sala já tem 50).');
+        void showEmojis();
       });
     };
     const head = el('div', 'pick-head');
-    head.append(el('span', 'muted', room.emotes.size ? 'Emotes da sala' : 'A sala ainda não tem emotes'), add, emoteFile);
+    const actions = el('span', 'pick-actions');
+    actions.append(add, manage);
+    head.append(el('span', 'muted', 'Meus emotes'), actions, emoteFile);
+    picker.append(head);
+
+    const mineGrid = el('div', 'pick-grid');
+    for (const e of mine) {
+      const b = el('button', 'pick' + (managing ? ' del' : ''));
+      b.type = 'button';
+      const img = el('img');
+      img.src = blobUrl(e);
+      b.title = managing ? `Apagar :${e.name}:` : `:${e.name}:`;
+      b.append(img);
+      b.onclick = async () => {
+        if (!managing) return insert(`:${e.name}: `);
+        await removeMyEmote(e.name);
+        if (room.emotes.get(e.name)?.by === room.selfId) room.removeEmote(e.name);
+        void showEmojis();
+      };
+      mineGrid.append(b);
+    }
+    if (!mine.length) mineGrid.append(el('span', 'muted', 'Você ainda não tem emotes. Crie um a partir de qualquer imagem; ele fica guardado e entra sozinho nas salas.'));
+    picker.append(mineGrid);
+
+    const others = [...room.emotes.values()].filter((e) => !(e.by === room.selfId && mineNames.has(e.name)));
+    if (others.length) {
+      picker.append(el('div', 'muted pick-sub', managing ? 'Emotes da sala (clique para copiar para os seus)' : 'Emotes da sala'));
+      const grid = el('div', 'pick-grid');
+      for (const e of others) {
+        const b = el('button', 'pick' + (managing ? ' add' : ''));
+        b.type = 'button';
+        const img = el('img');
+        img.src = blobUrl(e);
+        b.title = managing ? `Copiar :${e.name}: para os meus emotes` : `:${e.name}:`;
+        b.append(img);
+        b.onclick = async () => {
+          if (!managing) return insert(`:${e.name}: `);
+          const saved = await saveMyEmote(e.name, e.data).catch(() => null);
+          deps.toast(saved === 'full' ? 'Sua coleção já tem 50 emotes.' : saved ? `:${e.name}: copiado para os seus emotes.` : 'Não deu para copiar esse emote.');
+          void showEmojis();
+        };
+        grid.append(b);
+      }
+      picker.append(grid);
+    }
+
     const grid = el('div', 'pick-grid');
     for (const [name, ch] of Object.entries(EMOJI)) {
       const b = el('button', 'pick', ch);
@@ -318,7 +406,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
       b.onclick = () => insert(ch);
       grid.append(b);
     }
-    picker.append(head, emotes, el('div', 'muted pick-sub', 'Emojis'), grid);
+    picker.append(el('div', 'muted pick-sub', 'Emojis'), grid);
   }
 
   function askName(suggested: string, done: (name: string) => void): void {
@@ -332,36 +420,86 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
     ok.onclick = () => {
       const n = name.value.toLowerCase();
       if (!/^[a-z0-9_]{2,24}$/.test(n)) return deps.toast('Nome do emote: 2 a 24 letras minúsculas, números ou _.');
+      row.remove();
       done(n);
-      showEmojis();
+    };
+    name.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        ok.click();
+      }
     };
     row.append(name, ok);
     picker.prepend(row);
     name.focus();
   }
 
-  async function shrinkEmote(f: Blob): Promise<Uint8Array | null> {
-    const raw = new Uint8Array(await f.arrayBuffer());
-    const mime = sniffImage(raw);
-    if (!mime) return null;
-    if (raw.byteLength <= MAX_EMOTE) return raw;
-    if (mime === 'image/gif') return null;
-    try {
-      const bmp = await createImageBitmap(new Blob([raw as BlobPart], { type: mime }));
-      const scale = Math.min(1, 96 / Math.max(bmp.width, bmp.height));
-      const canvas = new OffscreenCanvas(Math.max(1, Math.round(bmp.width * scale)), Math.max(1, Math.round(bmp.height * scale)));
-      canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      const out = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
-      return out.byteLength <= MAX_EMOTE ? out : null;
-    } catch {
-      return null;
+  // ---------- figurinhas ----------
+  async function showStickers(): Promise<void> {
+    const all = await listStickers().catch(() => []);
+    picker.replaceChildren();
+    picker.dataset.kind = 'sticker';
+    const add = el('button', 'ghost small', '+ Nova figurinha');
+    add.type = 'button';
+    const manage = el('button', 'ghost small', managing ? 'Concluir' : 'Gerenciar');
+    manage.type = 'button';
+    manage.onclick = () => {
+      managing = !managing;
+      void showStickers();
+    };
+    const pick = el('input');
+    pick.type = 'file';
+    pick.accept = file.accept;
+    pick.multiple = true;
+    pick.hidden = true;
+    add.onclick = () => pick.click();
+    pick.onchange = async () => {
+      const files = [...(pick.files ?? [])].slice(0, 30);
+      pick.value = '';
+      for (const f of files) if (!(await keepSticker(new Uint8Array(await f.arrayBuffer())))) break;
+    };
+    const head = el('div', 'pick-head');
+    const actions = el('span', 'pick-actions');
+    actions.append(add, manage);
+    head.append(el('span', 'muted', `Minhas figurinhas (${all.length})`), actions, pick);
+    picker.append(head);
+    const grid = el('div', 'stk-grid');
+    for (const st of all) {
+      const b = el('button', 'stk' + (managing ? ' del' : ''));
+      b.type = 'button';
+      b.title = managing ? 'Apagar esta figurinha' : 'Enviar';
+      const img = el('img');
+      img.src = blobUrl(st);
+      b.append(img);
+      b.onclick = async () => {
+        if (managing) {
+          await removeSticker(st.id);
+          return void showStickers();
+        }
+        if (!room.sendChat('', { mime: st.mime, data: st.data }, true)) return deps.toast('Sem conexão com a sala no momento.');
+        picker.hidden = true;
+        input.focus();
+      };
+      grid.append(b);
     }
+    picker.append(grid);
+    picker.append(
+      el('div', 'muted pick-sub', all.length ? 'Para criar mais: cole ou arraste uma imagem aqui, ou passe o mouse em qualquer imagem do chat e clique em "+ Figurinha".' : 'Nenhuma figurinha ainda. Cole (Ctrl+V) ou arraste uma imagem aqui, use "+ Nova figurinha", ou passe o mouse em qualquer imagem do chat e clique em "+ Figurinha".'),
+    );
   }
+
+  bStk.onclick = () => {
+    const open = picker.hidden || picker.dataset.kind !== 'sticker';
+    picker.hidden = !open;
+    managing = false;
+    if (open) void showStickers();
+  };
 
   bEmo.onclick = () => {
     const open = picker.hidden || picker.dataset.kind !== 'emoji';
     picker.hidden = !open;
-    if (open) showEmojis();
+    managing = false;
+    if (open) void showEmojis();
   };
 
   // ---------- GIFs ----------
@@ -434,11 +572,27 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
   room.onchatdel = (id) => {
     list.querySelector(`[data-id="${CSS.escape(id)}"]`)?.remove();
   };
-  room.onhistory = renderAll;
-  room.onemote = () => {
-    if (!picker.hidden && picker.dataset.kind === 'emoji') showEmojis();
-    renderAll(); // mensagens que citavam o emote antes de ele chegar
+  let published = false;
+  const publishOnce = () => {
+    if (published) return;
+    published = true;
+    void publishMine();
   };
+  room.onhistory = () => {
+    renderAll();
+    publishOnce();
+  };
+  let emoteTimer = 0;
+  room.onemote = () => {
+    // vários emotes chegam juntos ao entrar: redesenha uma vez só
+    clearTimeout(emoteTimer);
+    emoteTimer = window.setTimeout(() => {
+      if (!picker.hidden && picker.dataset.kind === 'emoji') void showEmojis();
+      renderAll(); // mensagens que citavam o emote antes de ele chegar
+    }, 120);
+  };
+  if (room.isHost) publishOnce();
+  else window.setTimeout(publishOnce, 3000);
   room.ontyping = (id) => {
     typers.set(id, Date.now());
     renderTyping();
@@ -454,6 +608,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps): { destroy(): void;
     },
     destroy() {
       clearInterval(typingTimer);
+      clearTimeout(emoteTimer);
       room.onchat = room.onchatdel = room.ontyping = room.onemote = () => {};
       room.onhistory = () => {};
       for (const u of urls.values()) URL.revokeObjectURL(u);

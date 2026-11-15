@@ -5,6 +5,8 @@ export const MAX_TEXT = 2000;
 export const MAX_IMAGE = 4 * 1024 * 1024; // GIFs animados passam como estão
 export const MAX_EMOTE = 128 * 1024;
 export const MAX_EMOTES = 50;
+export const MAX_STICKER = 1024 * 1024; // figurinha (GIF animado incluído)
+export const STICKER_SIDE = 320;
 export const MAX_LOG = 200;
 const LOG_IMAGE_BYTES = 12 * 1024 * 1024; // memória máxima com imagens no histórico
 const HISTORY_IMAGE_BYTES = 4 * 1024 * 1024; // imagens reenviadas a quem entra
@@ -69,6 +71,7 @@ export function cleanMessage(raw: unknown): ChatMessage | null {
     ts: typeof m.ts === 'number' && Number.isFinite(m.ts) ? m.ts : Date.now(),
     text,
     img: img ?? undefined,
+    sticker: (img && m.sticker === true) || undefined,
     expired: m.expired === true && !img ? true : undefined,
   };
 }

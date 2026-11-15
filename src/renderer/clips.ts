@@ -6,9 +6,15 @@
  */
 export interface ClipResult {
   data: ArrayBuffer;
-  ext: 'mp4' | 'webm';
+  ext: 'mp4' | 'webm' | 'm4a';
   seconds: number;
 }
+
+const AUDIO_TYPES: Array<[string, 'm4a' | 'webm']> = [
+  ['audio/mp4;codecs=mp4a.40.2', 'm4a'],
+  ['audio/webm;codecs=opus', 'webm'],
+  ['audio/webm', 'webm'],
+];
 
 const TYPES: Array<[string, 'mp4' | 'webm']> = [
   ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'mp4'],
@@ -27,7 +33,7 @@ export class ClipBuffer {
   private takes: Take[] = [];
   private timer = 0;
   private mime = '';
-  private ext: 'mp4' | 'webm' = 'webm';
+  private ext: 'mp4' | 'webm' | 'm4a' = 'webm';
   private closed = false;
 
   /** Assinatura das faixas gravadas: se a transmissão ganhar/perder faixas, o replay é recriado. */
@@ -41,11 +47,12 @@ export class ClipBuffer {
   constructor(
     source: MediaStream,
     private seconds: number,
+    private audioOnly = false,
   ) {
     this.key = ClipBuffer.keyOf(source);
     // Cópia com as faixas atuais: o gravador para se a lista de faixas mudar durante a gravação.
     this.stream = new MediaStream(source.getTracks().filter((t) => t.readyState === 'live'));
-    const hit = TYPES.find(([m]) => MediaRecorder.isTypeSupported(m));
+    const hit = (audioOnly ? AUDIO_TYPES : TYPES).find(([m]) => MediaRecorder.isTypeSupported(m));
     if (!hit) throw new Error('gravação não suportada');
     [this.mime, this.ext] = hit;
     this.begin();
@@ -54,7 +61,7 @@ export class ClipBuffer {
 
   private begin(): void {
     try {
-      const rec = new MediaRecorder(this.stream, { mimeType: this.mime, videoBitsPerSecond: 6_000_000, audioBitsPerSecond: 128_000 });
+      const rec = new MediaRecorder(this.stream, this.audioOnly ? { mimeType: this.mime, audioBitsPerSecond: 96_000 } : { mimeType: this.mime, videoBitsPerSecond: 6_000_000, audioBitsPerSecond: 128_000 });
       const take: Take = { rec, chunks: [], started: Date.now() };
       rec.ondataavailable = (e) => {
         if (e.data.size) take.chunks.push(e.data);

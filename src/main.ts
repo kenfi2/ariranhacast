@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, session, shell, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
@@ -31,7 +32,9 @@ app.commandLine.appendSwitch(
   'enable-features',
   ['MediaFoundationAV1Encoding', 'PlatformHEVCEncoderSupport', 'WebRtcAllowH265Send', 'WebRtcAllowH265Receive'].join(','),
 );
-app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+// WebRtcWgcRequireBorder desligado: pede ao Windows para não desenhar a borda amarela em volta
+// do que está sendo capturado (o Windows 10 ignora o pedido na captura de janelas).
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns,WebRtcWgcRequireBorder');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
@@ -126,13 +129,13 @@ function startAudioCap(sourceId: unknown): Promise<{ ok: boolean; reason?: strin
 // Exige um modificador (ou tecla de função), para nunca "engolir" uma tecla comum do sistema.
 const ACCELERATOR = /^(?:(?:Ctrl|Alt|Shift|Super)\+){1,3}(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|Space|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|num[0-9])$|^F(?:[1-9]|1\d|2[0-4])$/;
 
-function setHotkeys(keys: unknown): { mic: boolean; deaf: boolean; clip: boolean } {
+function setHotkeys(keys: unknown): { mic: boolean; deaf: boolean; clip: boolean; voice: boolean } {
   globalShortcut.unregisterAll();
-  const result = { mic: false, deaf: false, clip: false };
+  const result = { mic: false, deaf: false, clip: false, voice: false };
   if (!keys || typeof keys !== 'object') return result;
-  const { mic, deaf, clip } = keys as { mic?: unknown; deaf?: unknown; clip?: unknown };
+  const { mic, deaf, clip, voice } = keys as { mic?: unknown; deaf?: unknown; clip?: unknown; voice?: unknown };
   const used = new Set<string>();
-  const reg = (accel: unknown, which: 'mic' | 'deaf' | 'clip'): boolean => {
+  const reg = (accel: unknown, which: 'mic' | 'deaf' | 'clip' | 'voice'): boolean => {
     if (typeof accel !== 'string' || !ACCELERATOR.test(accel) || used.has(accel)) return false;
     try {
       const ok = globalShortcut.register(accel, () => send('lc:hotkey', which));
@@ -145,6 +148,7 @@ function setHotkeys(keys: unknown): { mic: boolean; deaf: boolean; clip: boolean
   result.mic = reg(mic, 'mic');
   result.deaf = reg(deaf, 'deaf');
   result.clip = reg(clip, 'clip');
+  result.voice = reg(voice, 'voice');
   return result;
 }
 
@@ -165,15 +169,16 @@ function openExternal(url: unknown): boolean {
 
 const clipDir = (): string => path.join(app.getPath('videos'), 'AriranhaCast');
 
-async function saveClip(data: unknown, ext: unknown): Promise<{ ok: boolean; path?: string; error?: string }> {
-  const kind = ext === 'mp4' ? 'mp4' : 'webm';
+async function saveClip(data: unknown, ext: unknown, voice: unknown): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const kind = ext === 'mp4' || ext === 'm4a' ? ext : 'webm';
+  const label = voice === true ? 'Voz' : 'Clipe';
   const buf = data instanceof ArrayBuffer ? Buffer.from(data) : ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : null;
-  if (!buf || buf.length < 1000 || buf.length > 600 * 1024 * 1024) return { ok: false, error: 'clipe vazio ou grande demais' };
+  if (!buf || buf.length < 200 || buf.length > 600 * 1024 * 1024) return { ok: false, error: 'clipe vazio ou grande demais' };
   try {
     fs.mkdirSync(clipDir(), { recursive: true });
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
-    const name = `Clipe ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${kind}`;
+    const name = `${label} ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${kind}`;
     const file = path.join(clipDir(), name);
     fs.writeFileSync(file, buf);
     return { ok: true, path: file };
@@ -710,7 +715,9 @@ app.whenReady().then(() => {
     updateOverlay();
   });
   handle('lc:open-external', (url: unknown) => openExternal(url));
-  handle('lc:save-clip', (data: unknown, ext: unknown) => saveClip(data, ext));
+  handle('lc:save-clip', (data: unknown, ext: unknown, voice: unknown) => saveClip(data, ext, voice));
+  // Windows 10 (build < 22000) sempre desenha a borda amarela ao capturar uma janela.
+  handle('lc:yellow-border', () => process.platform === 'win32' && Number(os.release().split('.')[2] ?? 0) < 22000);
   handle('lc:show-clip', (file: unknown) => {
     if (typeof file === 'string' && path.dirname(path.resolve(file)) === path.resolve(clipDir())) shell.showItemInFolder(path.resolve(file));
   });

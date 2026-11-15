@@ -20,6 +20,7 @@ cpSync('src/renderer/overlay.css', 'dist/renderer/overlay.css');
 cpSync('src/renderer/index.html', 'dist/renderer/index.html');
 cpSync('assets/tray.png', 'dist/tray.png');
 cpSync('assets/icon.png', 'dist/icon.png');
+cpSync('assets/icon.png', 'dist/renderer/icon.png');
 cpSync('src/renderer/style.css', 'dist/renderer/style.css');
 cpSync('src/renderer/pcm-worklet.js', 'dist/renderer/pcm-worklet.js');
 // Processador de áudio da supressão por IA (roda na thread de áudio, fora do bundle).

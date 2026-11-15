@@ -8,7 +8,7 @@
   </head>
   <body>
     <header id="topbar">
-      <div class="brand"><svg class="logo" viewBox="0 0 100 100" aria-hidden="true"><circle cx="23" cy="38" r="6" fill="#8a5a3c"/><circle cx="77" cy="38" r="6" fill="#8a5a3c"/><ellipse cx="50" cy="56" rx="34" ry="25" fill="#8a5a3c"/><ellipse cx="50" cy="66" rx="24" ry="16" fill="#edDEc6"/><ellipse cx="50" cy="58" rx="7" ry="5" fill="#2b1d17"/><circle cx="38" cy="48" r="4" fill="#2b1d17"/><circle cx="62" cy="48" r="4" fill="#2b1d17"/></svg>AriranhaCast <span id="app-version" class="muted"></span></div>
+      <div class="brand"><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
       <div id="upd" class="upd" hidden>
         <span id="upd-spin" class="spinner" hidden aria-hidden="true"></span>
         <span id="upd-text" role="status"></span>
@@ -64,6 +64,7 @@
             <button id="btn-cam" class="round" title="Câmera"></button>
             <button id="btn-screen" class="round" title="Transmitir tela"></button>
             <button id="btn-clip" class="round" title="Salvar clipe" hidden></button>
+            <button id="btn-vclip" class="round" title="Salvar clipe de voz" hidden></button>
             <button id="btn-chat" class="round" title="Chat"><span id="chat-badge" class="badge-n" hidden></span></button>
             <button id="btn-leave" class="round hangup" title="Sair da sala"></button>
           </div>
@@ -103,6 +104,7 @@
           <h3>Telas</h3>
           <div id="grid-screens" class="grid"></div>
           <h3>Janelas</h3>
+          <p id="share-border-tip" class="muted" hidden>No Windows 10, o próprio Windows desenha uma borda amarela na janela capturada e nenhum app consegue tirar (quem assiste não vê a borda). Para não ter a borda, transmita a tela inteira; no Windows 11 ela não aparece.</p>
           <div id="grid-windows" class="grid"></div>
         </div>
         <aside class="share-side">
@@ -175,14 +177,31 @@
     <dialog id="dlg-settings">
       <form method="dialog">
         <h2>Configurações</h2>
+        <div class="tabs" role="tablist">
+          <button type="button" data-tab="geral" class="on">Geral</button>
+          <button type="button" data-tab="voz">Voz</button>
+          <button type="button" data-tab="clipes">Atalhos e clipes</button>
+          <button type="button" data-tab="rede">Rede</button>
+          <button type="button" data-tab="extras">Overlay e chat</button>
+        </div>
+        <section data-pane="geral">
         <label>Seu nome <input id="set-name" maxlength="24" /></label>
         <label>Servidor de sinalização próprio (opcional)
           <input id="set-server" placeholder="exemplo.com:9000 — vazio usa a nuvem pública do PeerJS" />
         </label>
-        <label>Servidor TURN (opcional): JSON ou URL de credenciais
-          <textarea id="set-ice" rows="3" spellcheck="false" placeholder='https://SEUAPP.metered.live/api/v1/turn/credentials?apiKey=...   ou   [{"urls":"turn:exemplo.com:3478","username":"u","credential":"s"}]'></textarea>
-        </label>
-        <p class="muted">O TURN retransmite a conexão quando duas redes não fecham ligação direta (CGNAT). Basta quem cria a sala configurar: os participantes recebem o mesmo servidor ao entrar. Todos precisam usar o mesmo servidor de sinalização. Mudanças valem a partir da próxima sala.</p>
+        <div class="row between">
+          <span id="upd-set-text" class="muted"></span>
+          <button id="btn-upd-check" type="button" class="ghost" hidden>Verificar atualizações</button>
+        </div>
+        <div id="fw-row" class="row between" hidden>
+          <span id="fw-text" class="muted"></span>
+          <button id="btn-fw" type="button" class="ghost">Liberar no Firewall</button>
+        </div>
+        </section>
+        <section data-pane="voz" hidden>
+          <div id="voice-settings"></div>
+        </section>
+        <section data-pane="clipes" hidden>
         <div class="row hot">
           <label>Atalho: microfone <input id="set-hot-mic" readonly placeholder="clique e pressione" /></label>
           <label>Atalho: silenciar vozes <input id="set-hot-deaf" readonly placeholder="clique e pressione" /></label>
@@ -197,13 +216,36 @@
             </select>
           </label>
         </div>
+        <div class="row hot">
+          <label>Atalho: salvar clipe de voz <input id="set-hot-voice" readonly placeholder="clique e pressione" /></label>
+          <label>Replay de voz
+            <select id="set-voice-secs">
+              <option value="0">Desligado</option>
+              <option value="30">Últimos 30 s</option>
+              <option value="60">Último 1 min</option>
+              <option value="120">Últimos 2 min</option>
+            </select>
+          </label>
+        </div>
         <label class="check"><input id="set-clip-watched" type="checkbox" /> Clipar também as transmissões que eu assisto</label>
-        <p class="muted">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho. Os clipes vão para a pasta Vídeos/AriranhaCast; o replay fica só na memória e usa um pouco de CPU.</p>
-        <h3>TURN</h3>
+        <p class="muted">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho. Os clipes vão para a pasta Vídeos/AriranhaCast; o replay fica só na memória e usa um pouco de CPU. O clipe de voz guarda só o áudio da conversa (você e os amigos); avise o pessoal antes de gravar.</p>
+        </section>
+        <section data-pane="rede" hidden>
+        <label>Servidor TURN (opcional): JSON ou URL de credenciais
+          <textarea id="set-ice" rows="3" spellcheck="false" placeholder='https://SEUAPP.metered.live/api/v1/turn/credentials?apiKey=...   ou   [{"urls":"turn:exemplo.com:3478","username":"u","credential":"s"}]'></textarea>
+        </label>
+        <p class="muted">O TURN retransmite a conexão quando duas redes não fecham ligação direta (CGNAT). Basta quem cria a sala configurar: os participantes recebem o mesmo servidor ao entrar. Todos precisam usar o mesmo servidor de sinalização. Mudanças valem a partir da próxima sala.</p>
         <label class="check"><input id="set-relay-eco" type="checkbox" /> Modo econômico: reduzir a qualidade do vídeo quando a conexão passa pelo TURN</label>
         <label>Franquia mensal do TURN em GB (0 = não avisar) <input id="set-turn-gb" type="number" min="0" max="10000" step="1" /></label>
         <p class="muted">Quem estiver conectado pelo TURN pode falar, usar o chat e assistir, mas não pode transmitir a tela (é o que mais gasta a franquia).</p>
-        <h3>Overlay</h3>
+        <div class="row">
+          <button id="btn-netcheck" type="button" class="ghost">Testar minha rede</button>
+          <button id="btn-report" type="button" class="ghost">Copiar relatório de conexão</button>
+        </div>
+        <pre id="netcheck-out" class="netcheck" hidden></pre>
+        </section>
+        <section data-pane="extras" hidden>
+          <h3>Overlay</h3>
         <label class="check"><input id="set-ov-on" type="checkbox" /> Mostrar quem está falando por cima do jogo</label>
         <div class="row hot">
           <label>Canto
@@ -222,22 +264,9 @@
           </label>
         </div>
         <p class="muted">O overlay aparece sobre jogos em janela ou "tela cheia sem bordas". Em tela cheia exclusiva o Windows não deixa nenhuma janela ficar por cima.</p>
-        <h3>Chat</h3>
+          <h3>Chat</h3>
         <label>Chave do Giphy para procurar GIFs (opcional) <input id="set-giphy" maxlength="64" autocomplete="off" spellcheck="false" placeholder="grátis em developers.giphy.com" /></label>
-        <h3>Rede</h3>
-        <div class="row">
-          <button id="btn-netcheck" type="button" class="ghost">Testar minha rede</button>
-          <button id="btn-report" type="button" class="ghost">Copiar relatório de conexão</button>
-        </div>
-        <pre id="netcheck-out" class="netcheck" hidden></pre>
-        <div class="row between">
-          <span id="upd-set-text" class="muted"></span>
-          <button id="btn-upd-check" type="button" class="ghost" hidden>Verificar atualizações</button>
-        </div>
-        <div id="fw-row" class="row between" hidden>
-          <span id="fw-text" class="muted"></span>
-          <button id="btn-fw" type="button" class="ghost">Liberar no Firewall</button>
-        </div>
+        </section>
         <div class="row end">
           <button id="set-save" class="primary" value="save">Salvar</button>
         </div>

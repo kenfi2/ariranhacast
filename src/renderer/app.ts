@@ -9,7 +9,8 @@ import { describeNetwork, probeNetwork, type NetInfo } from './netcheck';
 import { hasTurn, loadIce, net, normalizeCode } from './signaling';
 import type { CodecChoice, EncodeOpts, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
-import { mountVoicePanel } from './voicePanel';
+import { addSticker, listMyEmotes, listStickers } from './library';
+import { mountVoicePanel, mountVoiceSettings } from './voicePanel';
 import { formatBytes, TurnMeter } from './turnmeter';
 import { Watch } from './watch';
 
@@ -34,6 +35,7 @@ const ICON = {
   cam: '<rect x="2.5" y="6" width="12.5" height="12" rx="2.5"/><path d="M15 10.5l6.5-3.5v10L15 13.5z"/>',
   screen: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/>',
   chat: '<path d="M4 5.5h16v10.5H10l-4.5 3.5v-3.5H4z"/>',
+  vclip: '<rect x="9.5" y="3.5" width="5" height="10" rx="2.5"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3.5"/><circle cx="18.5" cy="5.5" r="2.6" fill="currentColor" stroke="none"/>',
   clip: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/>',
   hangup: '<path d="M3.5 14.2c4.8-4.6 12.2-4.6 17 0l-2.3 2.4-3.2-1.5v-2.6c-1.9-.6-4.1-.6-6 0v2.6l-3.2 1.5z"/>',
 };
@@ -53,6 +55,8 @@ function loadSettings(): Settings {
     hotMic: typeof saved.hotMic === 'string' ? saved.hotMic : 'Ctrl+Shift+M',
     hotDeaf: typeof saved.hotDeaf === 'string' ? saved.hotDeaf : 'Ctrl+Shift+D',
     hotClip: typeof saved.hotClip === 'string' ? saved.hotClip : 'Ctrl+Shift+C',
+    hotVoice: typeof saved.hotVoice === 'string' ? saved.hotVoice : 'Ctrl+Shift+G',
+    voiceSeconds: saved.voiceSeconds === 0 || saved.voiceSeconds === 30 || saved.voiceSeconds === 120 ? saved.voiceSeconds : 60,
     giphyKey: typeof saved.giphyKey === 'string' ? saved.giphyKey : '',
     relayEconomy: saved.relayEconomy !== false,
     turnLimitGb: Number.isFinite(saved.turnLimitGb) ? Math.max(0, Number(saved.turnLimitGb)) : 20,
@@ -128,6 +132,9 @@ function renderUpdater(s: UpdaterState): void {
   const check = $<HTMLButtonElement>('btn-upd-check');
   check.hidden = s.state === 'disabled';
   check.disabled = s.state === 'checking' || s.state === 'downloading' || s.state === 'ready';
+  const top = $<HTMLButtonElement>('btn-upd-top');
+  top.hidden = check.hidden;
+  top.disabled = check.disabled;
   set.textContent = s.state === 'disabled' ? (UPD_OFF[s.reason] ?? '') : `Versão instalada: ${$('app-version').textContent?.replace('versão ', '') ?? ''}`;
 }
 
@@ -152,6 +159,7 @@ $('upd-btn').onclick = () => {
   void window.ariranhacast.updaterInstall();
 };
 $('btn-upd-check').onclick = () => void window.ariranhacast.updaterCheck();
+$('btn-upd-top').onclick = () => void window.ariranhacast.updaterCheck();
 window.ariranhacast.onUpdater((s) => {
   renderUpdater(s);
   if (s.state === 'ready') toast(`Versão ${s.version} baixada. Clique em "Reiniciar e atualizar" quando quiser.`);
@@ -165,6 +173,8 @@ $('btn-settings').onclick = () => {
   $<HTMLInputElement>('set-hot-mic').value = settings.hotMic;
   $<HTMLInputElement>('set-hot-deaf').value = settings.hotDeaf;
   $<HTMLInputElement>('set-hot-clip').value = settings.hotClip;
+  $<HTMLInputElement>('set-hot-voice').value = settings.hotVoice;
+  $<HTMLSelectElement>('set-voice-secs').value = String(settings.voiceSeconds);
   $<HTMLSelectElement>('set-clip-secs').value = String(settings.clipSeconds);
   $<HTMLInputElement>('set-clip-watched').checked = settings.clipWatched;
   $<HTMLInputElement>('set-relay-eco').checked = settings.relayEconomy;
@@ -174,8 +184,21 @@ $('btn-settings').onclick = () => {
   $<HTMLSelectElement>('set-ov-mode').value = settings.overlayMode;
   $<HTMLInputElement>('set-giphy').value = settings.giphyKey;
   void refreshFirewall();
+  unmountVoiceSettings();
+  unmountVoiceSettings = mountVoiceSettings($('voice-settings'), () => voice);
   $<HTMLDialogElement>('dlg-settings').showModal();
 };
+let unmountVoiceSettings: () => void = () => {};
+$<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
+  unmountVoiceSettings();
+  unmountVoiceSettings = () => {};
+});
+// Abas das configurações
+function showTab(name: string): void {
+  for (const b of document.querySelectorAll<HTMLElement>('#dlg-settings .tabs button')) b.classList.toggle('on', b.dataset.tab === name);
+  for (const p of document.querySelectorAll<HTMLElement>('#dlg-settings [data-pane]')) p.hidden = p.dataset.pane !== name;
+}
+for (const b of document.querySelectorAll<HTMLElement>('#dlg-settings .tabs button')) b.onclick = () => showTab(b.dataset.tab!);
 
 const FW_TEXT: Record<string, string> = {
   ok: '✓ Firewall do Windows: liberado para o AriranhaCast.',
@@ -216,6 +239,8 @@ $<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
     hotMic: $<HTMLInputElement>('set-hot-mic').value,
     hotDeaf: $<HTMLInputElement>('set-hot-deaf').value,
     hotClip: $<HTMLInputElement>('set-hot-clip').value,
+    hotVoice: $<HTMLInputElement>('set-hot-voice').value,
+    voiceSeconds: Number($<HTMLSelectElement>('set-voice-secs').value) as Settings['voiceSeconds'],
     giphyKey: $<HTMLInputElement>('set-giphy').value.trim(),
     relayEconomy: $<HTMLInputElement>('set-relay-eco').checked,
     turnLimitGb: Math.max(0, Number($<HTMLInputElement>('set-turn-gb').value) || 0),
@@ -230,12 +255,13 @@ $<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
   if (room) {
     void applyHotkeys();
     syncClipTarget();
+    syncVoiceClip();
     updateControls();
   }
 });
 
 // Campos de atalho: clique e pressione a combinação. Backspace limpa.
-for (const id of ['set-hot-mic', 'set-hot-deaf', 'set-hot-clip']) {
+for (const id of ['set-hot-mic', 'set-hot-deaf', 'set-hot-clip', 'set-hot-voice']) {
   const input = $<HTMLInputElement>(id);
   input.onkeydown = (e) => {
     e.preventDefault();
@@ -250,8 +276,8 @@ for (const id of ['set-hot-mic', 'set-hot-deaf', 'set-hot-clip']) {
 }
 
 async function applyHotkeys(): Promise<void> {
-  const r = await window.ariranhacast.setHotkeys({ mic: settings.hotMic, deaf: settings.hotDeaf, clip: settings.clipSeconds ? settings.hotClip : '' });
-  const failed = [settings.hotMic && !r.mic && settings.hotMic, settings.hotDeaf && !r.deaf && settings.hotDeaf, settings.clipSeconds && settings.hotClip && !r.clip && settings.hotClip].filter(Boolean);
+  const r = await window.ariranhacast.setHotkeys({ mic: settings.hotMic, deaf: settings.hotDeaf, clip: settings.clipSeconds ? settings.hotClip : '', voice: settings.voiceSeconds ? settings.hotVoice : '' });
+  const failed = [settings.hotMic && !r.mic && settings.hotMic, settings.hotDeaf && !r.deaf && settings.hotDeaf, settings.clipSeconds && settings.hotClip && !r.clip && settings.hotClip, settings.voiceSeconds && settings.hotVoice && !r.voice && settings.hotVoice].filter(Boolean);
   if (failed.length) toast(`Atalho indisponível (já usado por outro programa): ${failed.join(', ')}`);
 }
 
@@ -277,6 +303,7 @@ window.ariranhacast.onHotkey(async (which) => {
   if (!room || !voice) return;
   if (which === 'leave') return leaveRoom();
   if (which === 'clip') return void saveClip();
+  if (which === 'voice') return void saveVoiceClip();
   if (which === 'mic') {
     await voice.setMic(!voice.micOn);
     cue(voice.micOn);
@@ -345,6 +372,7 @@ let pollTimer = 0;
 let busy = false;
 let chat: { destroy(): void; opened(): void } | null = null;
 let clipBuf: ClipBuffer | null = null;
+let voiceClip: ClipBuffer | null = null; // replay só de áudio da conversa
 const routes = new Map<string, Route>(); // rota da conexão de voz com cada pessoa
 let allRelayStreak = 0; // leituras seguidas em que todas as conexões passam pelo TURN
 /** Este PC só alcança a sala pelo TURN: pode falar e assistir, mas não transmitir a tela. */
@@ -439,7 +467,8 @@ async function enterRoom(create: boolean, code?: string, password = ''): Promise
     updateSpeaking();
     updateControls();
   });
-  if (testing) window.setInterval(() => log('chatlog', settings.name, r.chatLog.map((m) => `${m.name}:${m.text.slice(0, 20)}:${m.img ? m.img.mime + '/' + m.img.data.byteLength : '-'}`).join(' ; '), `emotes=${[...r.emotes.keys()].join(',')}`, `dom=${document.querySelectorAll('.chat-msg').length}/${document.querySelectorAll('.chat-img').length}/${document.querySelectorAll('img.emote').length}`), 4000);
+  syncVoiceClip();
+  if (testing) window.setInterval(() => log('chatlog', settings.name, r.chatLog.map((m) => `${m.name}:${m.text.slice(0, 20)}:${m.img ? m.img.mime + '/' + m.img.data.byteLength : '-'}`).join(' ; '), `emotes=${[...r.emotes.keys()].join(',')}`, `dom=${document.querySelectorAll('.chat-msg').length}/${document.querySelectorAll('.chat-img').length}+${document.querySelectorAll('.chat-sticker').length}/${document.querySelectorAll('img.emote').length}`), 4000);
   r.onroster = onRoster;
   r.onend = (reason) => leaveRoom(reason);
   r.onstatus = (text) => {
@@ -499,6 +528,8 @@ function leaveRoom(reason?: string): void {
   routes.clear();
   allRelayStreak = 0;
   lastOverlay = '';
+  voiceClip?.close();
+  voiceClip = null;
   unmountVoice();
   unmountVoice = () => {};
   voice?.close();
@@ -582,6 +613,10 @@ function updateControls(): void {
   clip.innerHTML = svg(ICON.clip);
   clip.hidden = !settings.clipSeconds;
   clip.classList.toggle('dim', !clipBuf);
+  const vclip = $('btn-vclip');
+  vclip.innerHTML = svg(ICON.vclip);
+  vclip.hidden = !settings.voiceSeconds;
+  vclip.title = `Salvar clipe de voz: o que foi dito nos últimos ${settings.voiceSeconds}–${settings.voiceSeconds * 2} s${settings.hotVoice ? ` (${settings.hotVoice})` : ''}`;
   clip.title = clipBuf ? `Salvar clipe dos últimos ${settings.clipSeconds}–${settings.clipSeconds * 2} s${settings.hotClip ? ` (${settings.hotClip})` : ''}` : 'Clipes: transmita ou assista a uma transmissão para ter o que salvar';
   $('btn-pause').textContent = broadcast?.paused ? 'Retomar transmissão' : 'Pausar transmissão';
   $('btn-leave').innerHTML = svg(ICON.hangup);
@@ -617,6 +652,7 @@ $('btn-chat').onclick = () => {
   updateControls();
 };
 $('btn-clip').onclick = () => void saveClip();
+$('btn-vclip').onclick = () => void saveVoiceClip();
 $('btn-pause').onclick = () => {
   if (!broadcast) return;
   broadcast.setPaused(!broadcast.paused);
@@ -988,6 +1024,7 @@ function openShare(isSwitch: boolean): void {
     for (const c of availableCodecs()) codecSel.add(new Option(labels[c] ?? c, c));
   }
   $<HTMLDialogElement>('dlg-share').showModal();
+  void window.ariranhacast.yellowBorder().then((on) => ($('share-border-tip').hidden = !on));
   void refreshSources();
 }
 
@@ -1401,6 +1438,39 @@ async function saveClip(): Promise<void> {
   }
 }
 
+// ---------- clipe de voz ----------
+function syncVoiceClip(): void {
+  const want = !!room && !!voice && settings.voiceSeconds > 0;
+  if (want && voiceClip) return;
+  voiceClip?.close();
+  voiceClip = null;
+  if (!want) return;
+  try {
+    voiceClip = new ClipBuffer(voice!.recordStream, settings.voiceSeconds, true);
+  } catch {
+    /* este PC não consegue gravar áudio: segue sem clipe de voz */
+  }
+}
+
+async function saveVoiceClip(): Promise<void> {
+  if (clipping) return;
+  if (!settings.voiceSeconds) return toast('O clipe de voz está desligado em Configurações > Atalhos e clipes.');
+  if (!voiceClip) return toast('Entre numa sala para ter o que gravar.');
+  clipping = true;
+  try {
+    const clip = await voiceClip.save();
+    if (!clip) return toast('O replay de voz ainda não tem áudio suficiente.');
+    const r = await window.ariranhacast.saveClip(clip.data, clip.ext, true);
+    if (!r.ok || !r.path) return toast(`Não foi possível salvar o clipe de voz: ${r.error ?? 'erro'}`);
+    cue(true);
+    toast(`Clipe de voz de ${clip.seconds} s salvo em Vídeos/AriranhaCast.`);
+    log('vclip', `${clip.seconds}s ${clip.ext} ${clip.data.byteLength}`);
+    if (!testing) void window.ariranhacast.showClip(r.path);
+  } finally {
+    clipping = false;
+  }
+}
+
 // ---------- relatório de conexão ----------
 async function connectionReport(): Promise<string> {
   const lines: string[] = [`AriranhaCast ${appVersion} · protocolo ${PROTO} · ${new Date().toLocaleString('pt-BR')}`];
@@ -1522,7 +1592,24 @@ if (testing) {
         if (!cur) return;
         const other = cur.roster.find((p) => p.id !== cur.selfId);
         log('act', what);
-        if (what === 'voicetest') void voice?.testMic((st, err) => log('voicetest', st, err ?? ''), 2);
+        if (what === 'voicetest') void voice?.setMonitor(!voice.monitoring).then(() => log('voicetest', `monitoring=${voice?.monitoring} mic=${voice?.micOn} level=${voice?.selfLevel().toFixed(2)} err=${voice?.micError}`));
+        else if (what === 'vclip') void saveVoiceClip();
+        else if (what === 'settings') { $('btn-settings').click(); showTab(params.get('tab') ?? 'voz'); }
+        else if (what === 'sticker') {
+          void (async () => {
+            const cv = new OffscreenCanvas(600, 400);
+            const g = cv.getContext('2d')!;
+            g.fillStyle = '#e67e22';
+            g.beginPath();
+            g.arc(300, 200, 180, 0, 7);
+            g.fill();
+            const raw = new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer());
+            const st = await addSticker(raw);
+            const ok = st && st !== 'full' ? cur.sendChat('', { mime: st.mime, data: st.data }, true) : false;
+            log('sticker', ok, st && st !== 'full' ? `${st.mime}/${st.data.byteLength}` : String(st), `lib=${(await listStickers()).length} emotes=${(await listMyEmotes()).map((e) => e.name).join(',')}`);
+            document.querySelector<HTMLElement>('.chat-bar button[title="Figurinhas"]')?.click();
+          })();
+        }
         else if (what === 'clip') void saveClip();
         else if (what === 'report') $('btn-report').click();
         else if (what === 'pause') $('btn-pause').click();

@@ -118,3 +118,10 @@ pedido de administrador do próprio Windows (UAC).
 - **Link de convite.** O app registra `ariranhacast://` no Windows. Só o formato `ariranhacast://entrar/CODIGO` é aceito, e ele apenas preenche o código e tenta entrar; senha nunca vai no link.
 - **Instância única.** Abrir o app de novo só traz a janela existente para frente.
 - **Não verificado em Windows real:** overlay sobre jogos, clipes em H.264/MP4 (no Linux de teste sai WebM), registro do link de convite, e o workflow de release.
+
+## Novidades da 0.5.0
+
+- **Clipe de voz.** O replay guarda na memória o áudio da conversa (o seu microfone quando ligado e as vozes dos outros) e só grava em disco quando você pede. Você estará gravando outras pessoas: avise antes. Ninguém na sala é notificado automaticamente.
+- **Figurinhas e emotes pessoais.** Ficam no armazenamento local do app (IndexedDB), só neste PC. Passam pelas mesmas verificações das imagens do chat (tipo conferido pelos bytes, limite de 1 MB por figurinha e 128 KB por emote). Só o dono de um emote (ou quem hospeda) consegue tirá-lo da sala.
+- **Teste de microfone.** O retorno toca só no seu PC; durante o teste o envio para a sala fica cortado.
+- **Não verificado em Windows real:** o retorno do microfone na saída escolhida, o formato do clipe de voz (deve sair .m4a; no Linux de teste saiu .webm) e a ausência da borda amarela no Windows 11.

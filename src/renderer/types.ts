@@ -13,8 +13,8 @@ export interface AriranhaBridge {
   startAudioCap(sourceId: string): Promise<{ ok: boolean; reason?: string }>;
   stopAudioCap(): Promise<void>;
   onPcm(cb: (chunk: Uint8Array) => void): void;
-  setHotkeys(keys: { mic: string; deaf: string; clip: string } | null): Promise<{ mic: boolean; deaf: boolean; clip: boolean }>;
-  onHotkey(cb: (which: 'mic' | 'deaf' | 'leave' | 'clip') => void): void;
+  setHotkeys(keys: { mic: string; deaf: string; clip: string; voice: string } | null): Promise<{ mic: boolean; deaf: boolean; clip: boolean; voice: boolean }>;
+  onHotkey(cb: (which: 'mic' | 'deaf' | 'leave' | 'clip' | 'voice') => void): void;
   setInRoom(on: boolean, micOn: boolean): Promise<void>;
   appVersion(): Promise<string>;
   onUpdate(cb: (text: string) => void): void;
@@ -25,8 +25,9 @@ export interface AriranhaBridge {
   firewallStatus(): Promise<FirewallState>;
   firewallFix(): Promise<FirewallState>;
   openExternal(url: string): Promise<boolean>;
-  saveClip(data: ArrayBuffer, ext: string): Promise<{ ok: boolean; path?: string; error?: string }>;
+  saveClip(data: ArrayBuffer, ext: string, voice?: boolean): Promise<{ ok: boolean; path?: string; error?: string }>;
   showClip(path: string): Promise<void>;
+  yellowBorder(): Promise<boolean>;
   flash(): Promise<void>;
   gifSearch(key: string, query: string): Promise<{ ok: boolean; items: GifItem[]; error?: string }>;
   gifFetch(url: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }>;
@@ -118,13 +119,14 @@ export type Msg =
   | { t: 'cmd'; cmd: 'mute' }
   | { t: 'kick' }
   // chat: membro → anfitrião (anfitrião define autor, hora e id) e anfitrião → todos
-  | { t: 'chat'; text: string; img?: ChatImage }
+  | { t: 'chat'; text: string; img?: ChatImage; sticker?: boolean }
   | { t: 'chat-msg'; m: ChatMessage }
   | { t: 'chat-history'; msgs: ChatMessage[]; emotes: Emote[] }
   | { t: 'chat-del'; id: string }
   | { t: 'typing'; id?: string }
   | { t: 'emote-add'; emote: Emote }
-  | { t: 'emote'; emote: Emote };
+  | { t: 'emote'; emote: Emote }
+  | { t: 'emote-del'; name: string };
 
 export interface ChatImage {
   mime: string;
@@ -138,6 +140,7 @@ export interface ChatMessage {
   ts: number;
   text: string;
   img?: ChatImage;
+  sticker?: boolean; // a imagem é uma figurinha (mostrada menor e sem moldura)
   expired?: boolean; // a imagem foi descartada do histórico para poupar memória
 }
 
@@ -155,6 +158,8 @@ export interface Settings {
   hotMic: string; // atalho global: ligar/desligar microfone
   hotDeaf: string; // atalho global: silenciar vozes
   hotClip: string; // atalho global: salvar um clipe
+  hotVoice: string; // atalho global: salvar um clipe só de voz
+  voiceSeconds: 0 | 30 | 60 | 120; // replay de voz (0 = desligado)
   giphyKey: string; // chave gratuita do Giphy para buscar GIFs no chat (opcional)
   relayEconomy: boolean; // limita a qualidade das conexões que passam pelo TURN
   turnLimitGb: number; // limite mensal do plano de TURN, para avisar (0 = sem aviso)

@@ -90,7 +90,7 @@ export class Room {
   onchat: (m: ChatMessage) => void = () => {};
   onchatdel: (id: string) => void = () => {};
   ontyping: (id: string) => void = () => {};
-  onemote: (e: Emote) => void = () => {};
+  onemote: (e: Emote | null) => void = () => {}; // null = um emote saiu da sala
   onhistory: () => void = () => {};
 
   onroster: (list: RosterEntry[]) => void = () => {};
@@ -277,7 +277,7 @@ export class Room {
         const text = cleanChatText(msg.text).trim();
         let img = msg.img ? cleanImage(msg.img) : null;
         if (img && !this.imageBudget(conn.peer, img.data.byteLength)) img = null; // imagens demais em pouco tempo
-        if (text || img) this.hostChat(conn.peer, member.entry.name, text, img ?? undefined);
+        if (text || img) this.hostChat(conn.peer, member.entry.name, text, img ?? undefined, msg.sticker === true);
       } else if (msg.t === 'chat-del') {
         const id = typeof msg.id === 'string' ? msg.id : '';
         if (this.chatLog.some((m) => m.id === id && m.from === conn.peer)) this.dropChat(id, true);
@@ -287,6 +287,9 @@ export class Room {
       } else if (msg.t === 'emote-add') {
         const e = cleanEmote(msg.emote, conn.peer);
         if (e) this.acceptEmote(e);
+      } else if (msg.t === 'emote-del') {
+        const name = typeof msg.name === 'string' ? msg.name : '';
+        if (this.emotes.get(name)?.by === conn.peer) this.dropEmote(name, true);
       }
     });
     const gone = () => {
@@ -374,15 +377,15 @@ export class Room {
 
   // ---------- chat ----------
   /** Envia uma mensagem (texto e/ou imagem). Quem hospeda distribui; os demais mandam a ele. */
-  sendChat(text: string, img?: ChatImage): boolean {
+  sendChat(text: string, img?: ChatImage, sticker = false): boolean {
     text = cleanChatText(text).trim();
     if (!text && !img) return false;
     if (this.isHost) {
-      this.hostChat(this.selfId, this.self.name, text, img);
+      this.hostChat(this.selfId, this.self.name, text, img, sticker);
       return true;
     }
     if (!this.control?.open) return false;
-    this.control.send({ t: 'chat', text, img } satisfies Msg);
+    this.control.send({ t: 'chat', text, img, sticker: sticker || undefined } satisfies Msg);
     return true;
   }
 
@@ -398,8 +401,8 @@ export class Room {
     return true;
   }
 
-  private hostChat(from: string, name: string, text: string, img?: ChatImage): void {
-    const m: ChatMessage = { id: `${Date.now().toString(36)}-${randomHex(4)}`, from, name, ts: Date.now(), text, img };
+  private hostChat(from: string, name: string, text: string, img?: ChatImage, sticker = false): void {
+    const m: ChatMessage = { id: `${Date.now().toString(36)}-${randomHex(4)}`, from, name, ts: Date.now(), text, img, sticker: (img && sticker) || undefined };
     this.pushChat(m);
     this.broadcast({ t: 'chat-msg', m });
   }
@@ -466,6 +469,20 @@ export class Room {
     this.storeEmote(e);
     this.broadcast({ t: 'emote', emote: e });
     return true;
+  }
+
+  /** Tira um emote seu da sala (quem hospeda pode tirar qualquer um). */
+  removeEmote(name: string): void {
+    const e = this.emotes.get(name);
+    if (!e) return;
+    if (this.isHost) this.dropEmote(name, true);
+    else if (e.by === this.selfId && this.control?.open) this.control.send({ t: 'emote-del', name } satisfies Msg);
+  }
+
+  private dropEmote(name: string, relay: boolean): void {
+    if (!this.emotes.delete(name)) return;
+    this.onemote(null);
+    if (relay) this.broadcast({ t: 'emote-del', name });
   }
 
   private storeEmote(e: Emote): void {
@@ -578,6 +595,8 @@ export class Room {
           if (typeof msg.id === 'string') this.dropChat(msg.id, false);
         } else if (msg.t === 'typing') {
           if (typeof msg.id === 'string' && msg.id !== this.selfId) this.ontyping(msg.id.slice(0, 64));
+        } else if (msg.t === 'emote-del') {
+          if (typeof msg.name === 'string') this.dropEmote(msg.name, false);
         } else if (msg.t === 'emote') {
           const e = cleanEmote(msg.emote, typeof msg.emote?.by === 'string' ? msg.emote.by.slice(0, 64) : '');
           if (e) this.storeEmote(e);

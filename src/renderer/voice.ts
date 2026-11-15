@@ -42,7 +42,7 @@ interface Remote {
 const SPEAK_DB = -50;
 const SPEAK_HOLD_MS = 350;
 
-function loadPrefs(): VoicePrefs {
+export function loadVoicePrefs(): VoicePrefs {
   try {
     const saved = JSON.parse(localStorage.getItem('ariranhacast.voice') ?? '{}');
     return {
@@ -79,13 +79,18 @@ function levelDb(analyser: AnalyserNode, buf: Float32Array<ArrayBuffer>): number
  * microfone ou trocar a supressão de ruído só religa o grafo, sem renegociar.
  */
 export class Voice {
-  readonly prefs = loadPrefs();
+  readonly prefs = loadVoicePrefs();
   micOn = false;
   deafened = false;
   micError = '';
   private ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
   private out = this.ctx.createMediaStreamDestination();
-  private micGain = this.ctx.createGain();
+  private micGain = this.ctx.createGain(); // microfone já tratado (supressão de ruído)
+  private sendGain = this.ctx.createGain(); // 1 = os amigos ouvem · 0 = mudo ou em teste
+  private monitorGain = this.ctx.createGain(); // retorno do teste de microfone
+  private recDest = this.ctx.createMediaStreamDestination(); // mistura da conversa para o clipe de voz
+  /** Teste de microfone ligado: você se ouve na hora e os amigos não te ouvem. */
+  monitoring = false;
   private selfAnalyser = this.ctx.createAnalyser();
   private buf = new Float32Array(1024);
   private mic?: MediaStream;
@@ -109,8 +114,15 @@ export class Voice {
     private allow: (id: string) => boolean, // o id pertence a alguém da sala?
   ) {
     this.selfAnalyser.fftSize = 1024;
-    this.micGain.connect(this.out);
+    this.micGain.connect(this.sendGain);
+    this.sendGain.connect(this.out);
+    this.sendGain.connect(this.recDest);
+    this.sendGain.gain.value = 0;
     this.micGain.connect(this.selfAnalyser);
+    this.monitorGain.gain.value = 0;
+    this.micGain.connect(this.monitorGain);
+    this.monitorGain.connect(this.ctx.destination);
+    this.applyMonitorSink();
     void this.ctx.resume();
     peer.on('call', (call) => this.onIncoming(call));
     this.timer = window.setInterval(() => this.tick(), 100);
@@ -190,6 +202,7 @@ export class Voice {
       r.analyser = this.ctx.createAnalyser();
       r.analyser.fftSize = 1024;
       r.source.connect(r.analyser);
+      r.source.connect(this.recDest);
       this.onchange();
     });
     call.on('close', gone);
@@ -217,8 +230,9 @@ export class Voice {
   async setMic(on: boolean): Promise<void> {
     this.micError = '';
     if (!on) {
-      this.closeMic();
       this.micOn = false;
+      this.syncSend();
+      if (!this.monitoring) this.closeMic();
       return this.onchange();
     }
     try {
@@ -226,11 +240,68 @@ export class Voice {
       this.micOn = true;
       if (this.deafened) this.setDeafened(false);
     } catch (e: any) {
-      this.closeMic();
-      this.micOn = false;
-      this.micError = e?.name === 'NotFoundError' ? 'Nenhum microfone encontrado.' : `Microfone indisponível (${e?.name ?? e}).`;
+      this.failMic(e);
     }
+    this.syncSend();
     this.onchange();
+  }
+
+  private failMic(e: any): void {
+    this.closeMic();
+    this.micOn = false;
+    this.monitoring = false;
+    this.monitorGain.gain.value = 0;
+    this.micError = e?.name === 'NotFoundError' ? 'Nenhum microfone encontrado.' : `Microfone indisponível (${e?.name ?? e}).`;
+  }
+
+  /** Os amigos só ouvem com o microfone ligado e fora do teste. */
+  private syncSend(): void {
+    this.sendGain.gain.value = this.micOn && !this.monitoring ? 1 : 0;
+  }
+
+  private applyMonitorSink(): void {
+    void (this.ctx as any).setSinkId?.(this.prefs.sinkId || '').catch(() => {});
+  }
+
+  /**
+   * Teste de microfone com retorno instantâneo: você se ouve ao vivo, do jeito que os amigos
+   * ouvem (com a supressão de ruído escolhida). Enquanto o teste está ligado, a sala não te ouve.
+   */
+  async setMonitor(on: boolean): Promise<void> {
+    if (on === this.monitoring) return;
+    this.micError = '';
+    if (on) {
+      try {
+        if (!this.mic) await this.openMic();
+        this.monitoring = true;
+        this.monitorGain.gain.value = 1;
+      } catch (e: any) {
+        this.failMic(e);
+      }
+    } else {
+      this.monitoring = false;
+      this.monitorGain.gain.value = 0;
+      if (!this.micOn) this.closeMic();
+    }
+    this.syncSend();
+    this.onchange();
+  }
+
+  /** Reabre o microfone (troca de dispositivo ou de supressão) mantendo mudo/teste como estavam. */
+  private async reopenMic(): Promise<void> {
+    if (!this.micOn && !this.monitoring) return;
+    try {
+      await this.openMic();
+    } catch (e: any) {
+      this.failMic(e);
+    }
+    this.syncSend();
+    this.onchange();
+  }
+
+  /** Mistura da conversa (seu microfone quando ligado + as vozes dos outros), para o clipe de voz. */
+  get recordStream(): MediaStream {
+    return this.recDest.stream;
   }
 
   private async openMic(): Promise<void> {
@@ -268,54 +339,6 @@ export class Voice {
     return Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 60) / 60)) : 0;
   }
 
-  testing = false;
-
-  /**
-   * Teste de voz: grava alguns segundos do microfone do jeito que os amigos ouvem (com a
-   * supressão de ruído escolhida) e toca de volta na saída das vozes.
-   */
-  async testMic(onstate: (state: 'gravando' | 'tocando' | 'fim', error?: string) => void, seconds = 4): Promise<void> {
-    if (this.testing) return;
-    this.testing = true;
-    const wasOn = this.micOn;
-    let tap: MediaStreamAudioDestinationNode | null = null;
-    try {
-      if (!wasOn) {
-        await this.setMic(true);
-        if (!this.micOn) throw new Error(this.micError || 'Microfone indisponível.');
-      }
-      tap = this.ctx.createMediaStreamDestination();
-      this.micGain.connect(tap);
-      const rec = new MediaRecorder(tap.stream);
-      const chunks: Blob[] = [];
-      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      const stopped = new Promise<void>((resolve) => (rec.onstop = () => resolve()));
-      rec.start();
-      onstate('gravando');
-      await new Promise((r) => setTimeout(r, seconds * 1000));
-      rec.stop();
-      await stopped;
-      if (!wasOn) await this.setMic(false);
-      const url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
-      const audio = new Audio(url);
-      audio.volume = this.prefs.volume;
-      if (this.prefs.sinkId) await (audio as any).setSinkId?.(this.prefs.sinkId).catch(() => {});
-      onstate('tocando');
-      await new Promise<void>((resolve) => {
-        audio.onended = audio.onerror = () => resolve();
-        void audio.play().catch(() => resolve());
-      });
-      URL.revokeObjectURL(url);
-      onstate('fim');
-    } catch (e: any) {
-      if (!wasOn && this.micOn) await this.setMic(false);
-      onstate('fim', e?.message ?? String(e));
-    } finally {
-      if (tap) this.micGain.disconnect(tap);
-      this.testing = false;
-    }
-  }
-
   private closeMic(): void {
     for (const n of this.micNodes) n.disconnect();
     this.micNodes = [];
@@ -328,18 +351,19 @@ export class Voice {
   async setMode(mode: NsMode): Promise<void> {
     this.prefs.mode = mode;
     this.save();
-    if (this.micOn) await this.setMic(true);
+    await this.reopenMic();
   }
 
   async setMicDevice(id: string): Promise<void> {
     this.prefs.micId = id;
     this.save();
-    if (this.micOn) await this.setMic(true);
+    await this.reopenMic();
   }
 
   setSink(id: string): void {
     this.prefs.sinkId = id;
     this.save();
+    this.applyMonitorSink();
     for (const r of this.remotes.values()) void (r.audio as any).setSinkId?.(id).catch(() => {});
   }
 
