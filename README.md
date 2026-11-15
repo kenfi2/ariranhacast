@@ -29,7 +29,7 @@ Continua compatível com a 0.4.0 (quem estiver na 0.4.0 vê as figurinhas como i
 - **Medidor de conexão** por pessoa (ping, perda, jitter) no painel de voz.
 - **Salas recentes**, botão **Convite** e link `ariranhacast://entrar/CODIGO`.
 - **Rede**: teste real de IPv6, **relatório de conexão** copiável, **modo econômico no TURN** (vídeo limitado a ~2,5 Mbps/30 fps quando passa pelo TURN), aviso da franquia, e quem depende do TURN **não transmite a tela**.
-- **Releases automáticas** por GitHub Actions: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- **Releases automáticas** por GitHub Actions: basta aumentar `version` no `package.json` e dar `git push` na `main` (a tag e a release são criadas sozinhas).
 
 Todos na sala precisam estar na 0.4.0 (o protocolo mudou).
 

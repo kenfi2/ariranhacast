@@ -1,16 +1,30 @@
-# Publica uma versão sozinho: ao enviar uma tag "vX.Y.Z", gera o instalador e cria a release
-# com tudo o que a atualização automática precisa (o .exe, o latest.yml e os hashes).
+# Publica sozinho: toda vez que o código vai para a "main" com uma versão nova no package.json
+# (ainda sem release), gera o instalador e cria a tag e a release com tudo o que a atualização
+# automática precisa (o .exe, o .zip portátil, o latest.yml e os hashes).
 #
-#   npm version 0.4.1 --no-git-tag-version   (ou edite "version" no package.json)
-#   git commit -am "AriranhaCast 0.4.1" && git tag v0.4.1 && git push origin main v0.4.1
+#   Para lançar a 0.5.1:  edite "version" no package.json  →  git commit  →  git push
+#   Pushes sem versão nova terminam em segundos sem fazer nada.
+#
+# Também funciona se você criar a tag "vX.Y.Z" na mão, ou rodando "release" na aba Actions.
 name: release
 
 on:
   push:
+    branches: [main]
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Refazer e sobrescrever os arquivos mesmo que a release já exista'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -18,40 +32,64 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Versão a publicar
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          v=$(node -p "require('./package.json').version")
+          tag="v$v"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "::error::A tag é $GITHUB_REF_NAME, mas o package.json diz $v. Sem isso o app não reconheceria a atualização."
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # Já publicada (release com o latest.yml)? Então não há nada a fazer.
+          if [ "$FORCE" != "true" ] && gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx 'latest.yml'; then
+            echo "A release $tag já está publicada: nada a fazer."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Vai publicar $tag."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.ver.outputs.skip != 'true'
         with:
           node-version: 22
           cache: npm
 
-      - name: A tag confere com o package.json
-        run: |
-          v=$(node -p "require('./package.json').version")
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::A tag é $GITHUB_REF_NAME, mas o package.json diz $v. Sem isso o app não reconheceria a atualização."
-            exit 1
-          fi
-
       - name: Ferramentas do instalador (NSIS e zip)
+        if: steps.ver.outputs.skip != 'true'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nsis zip
 
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run dist
+      - if: steps.ver.outputs.skip != 'true'
+        run: npm ci
+      - if: steps.ver.outputs.skip != 'true'
+        run: npm run typecheck
+      - if: steps.ver.outputs.skip != 'true'
+        run: npm run dist
         env:
           MAKENSIS: makensis
 
       - name: Criar a release
+        if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cd release
           ls -la
-          test -f "AriranhaCast-Setup-${GITHUB_REF_NAME#v}.exe"
+          test -f "AriranhaCast-Setup-$VERSION.exe"
           test -f latest.yml
           files="AriranhaCast-Setup-*.exe AriranhaCast-portatil-*.zip latest.yml SHA256SUMS.txt"
-          # Se a release já existe (criada pelo site), só anexa os arquivos; senão, cria.
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber $files
+          # Se a release já existe (criada pelo site), só anexa os arquivos; senão, cria
+          # (junto com a tag, apontando para este commit).
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber $files
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AriranhaCast ${GITHUB_REF_NAME#v}" --generate-notes $files
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AriranhaCast $VERSION" --generate-notes $files
           fi
