@@ -567,19 +567,23 @@ const accountFile = (): string => path.join(app.getPath('userData'), 'conta.bin'
 const lobby = new LobbyClient(
   lobbyUrl(),
   {
-    load(): Session | null {
+    // API assíncrona do safeStorage (a síncrona está obsoleta no Electron). Lê o que a versão antiga gravou.
+    async load(): Promise<Session | null> {
       try {
-        if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(accountFile())) return null;
-        return JSON.parse(safeStorage.decryptString(fs.readFileSync(accountFile())));
+        if (!fs.existsSync(accountFile()) || !(await safeStorage.isAsyncEncryptionAvailable())) return null;
+        const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(fs.readFileSync(accountFile()));
+        const session = JSON.parse(result) as Session;
+        if (shouldReEncrypt) fs.writeFileSync(accountFile(), await safeStorage.encryptStringAsync(result));
+        return session;
       } catch (e) {
         writeLog('error', 'conta', e);
         return null;
       }
     },
-    save(s: Session | null): void {
+    async save(s: Session | null): Promise<void> {
       try {
         if (!s) fs.rmSync(accountFile(), { force: true });
-        else if (safeStorage.isEncryptionAvailable()) fs.writeFileSync(accountFile(), safeStorage.encryptString(JSON.stringify(s)));
+        else if (await safeStorage.isAsyncEncryptionAvailable()) fs.writeFileSync(accountFile(), await safeStorage.encryptStringAsync(JSON.stringify(s)));
       } catch (e) {
         writeLog('error', 'conta', e);
       }
