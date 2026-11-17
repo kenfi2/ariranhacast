@@ -7,7 +7,14 @@ export interface Env {
   DISCORD_CLIENT_SECRET?: string; // wrangler secret put DISCORD_CLIENT_SECRET
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string; // wrangler secret put GOOGLE_CLIENT_SECRET
+  /** Webhook de um canal do Discord: avisa quando uma sala abre/fecha. wrangler secret put DISCORD_WEBHOOK_URL */
+  DISCORD_WEBHOOK_URL?: string;
+  /** Página para baixar o app (aparece no link de convite). */
+  DOWNLOAD_URL?: string;
 }
+
+/** Servidor do Discord do usuário (só ele recebe a própria lista). */
+export type Guild = { id: string; name: string; icon: string | null };
 
 export type User = {
   id: string; // "<provedor>:<id na conta>", ex.: "discord:1234"
@@ -26,6 +33,7 @@ export type Room = {
   members: string[]; // nomes
   live: number; // quantas transmissões ao vivo
   proto: number; // versão do protocolo da sala (app incompatível vê aviso)
+  guilds?: string[]; // servidores do Discord em comum entre quem hospeda e quem vê (calculado por pessoa)
   createdAt: number;
   updatedAt: number;
 };

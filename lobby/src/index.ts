@@ -24,7 +24,7 @@ function escapeHtml(s: string): string {
 }
 
 /** Página mostrada no navegador ao fim do login. `redirect` = link para voltar ao app. */
-function page(title: string, message: string, status = 200, redirect?: string): Response {
+function page(title: string, message: string, status = 200, redirect?: string, extra?: { href: string; label: string }): Response {
   const link = redirect ? escapeHtml(redirect) : "";
   const html = `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
@@ -36,11 +36,13 @@ ${redirect ? `<meta http-equiv="refresh" content="0;url=${link}">` : ""}
   main{text-align:center;max-width:420px;padding:24px}
   h1{font-size:22px;margin:0 0 8px} p{color:#8b93a3;line-height:1.5}
   a{display:inline-block;margin-top:12px;padding:10px 18px;border-radius:8px;background:#5b6be6;color:#fff;text-decoration:none;font-weight:600}
+  a.ghost{background:transparent;border:1px solid #2a2f3a;color:#e7e9ee;font-weight:400}
 </style></head>
 <body><main>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(message)}</p>
   ${redirect ? `<a href="${link}">Abrir o AriranhaCast</a>` : ""}
+  ${extra ? `<p><a class="ghost" href="${escapeHtml(extra.href)}">${escapeHtml(extra.label)}</a></p>` : ""}
 </main></body></html>`;
   return new Response(html, {
     status,
@@ -112,6 +114,14 @@ async function callback(req: Request, url: URL, env: Env, lobby: DurableObjectSt
 
   const user: User = { ...info, id: `${provider.id}:${info.id}`, provider: provider.id };
   const sessionToken = await lobby.createSession(user);
+  // Servidores do Discord: para mostrar primeiro as salas de quem está nos mesmos servidores.
+  if (provider.groups) {
+    try {
+      await lobby.saveGuilds(user.id, await provider.groups(tok.access_token));
+    } catch (e) {
+      console.log(`login ${provider.id}: lista de servidores falhou`, String(e));
+    }
+  }
 
   const deepLink = `${APP_SCHEME}://auth?token=${sessionToken}&app_state=${encodeURIComponent(appState)}`;
   return page("Login concluído", "Voltando para o AriranhaCast… pode fechar esta aba.", 200, deepLink);
@@ -183,8 +193,16 @@ export default {
       case "/lobby":
         return lobby.fetch(req);
 
-      default:
+      default: {
+        // Link de convite clicável (o Discord não deixa clicar em ariranhacast://): abre o app na sala.
+        const m = /^\/entrar\/([A-Za-z0-9]{4,16})\/?$/.exec(url.pathname);
+        if (m) {
+          const code = m[1].toUpperCase();
+          const download = /^https:\/\//.test(env.DOWNLOAD_URL ?? "") ? env.DOWNLOAD_URL! : "https://github.com/kenfi2/ariranhacast/releases/latest";
+          return page(`Sala ${code}`, "Abrindo o AriranhaCast… Se nada acontecer, toque no botão abaixo.", 200, `${APP_SCHEME}://entrar/${code}`, { href: download, label: "Ainda não tenho o app" });
+        }
         return json({ error: "not found" }, 404);
+      }
     }
   },
 } satisfies ExportedHandler<Env>;

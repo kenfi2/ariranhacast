@@ -837,7 +837,8 @@ renderRecent();
 // O processo principal mantém a sessão e o WebSocket com o servidor do lobby; aqui só a tela.
 // Com servidor de lobby configurado, entrar com uma conta (Discord, Google…) é obrigatório:
 // o nome e a foto vêm da conta, e a mesma conta pode estar no PC e no celular ao mesmo tempo.
-let lobbyState: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [] };
+let lobbyState: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [], guilds: [] };
+let lobbyFilter = ''; // id de um servidor do Discord, ou '' = todas as salas
 let pendingInvite = '';
 let lastProvider = '';
 let roomTitle = ''; // nome da sala atual, como aparece na lista
@@ -908,6 +909,26 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   who.title = r.members.join('\n');
   sub.append(avatar(r.host, 'lr-avatar'), who);
   main.append(title, sub);
+  // Servidores do Discord em comum com quem hospeda.
+  const shared = r.guilds.map((id) => lobbyState.guilds.find((g) => g.id === id)).filter((g): g is NonNullable<typeof g> => !!g);
+  if (shared.length) {
+    const chips = el('div', 'lr-guilds');
+    const g = shared.find((x) => x.id === lobbyFilter) ?? shared[0];
+    const chip = el('span', 'guild-chip');
+    chip.title = shared.map((x) => x.name).join('\n');
+    if (g.icon) {
+      const img = el('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.src = g.icon;
+      img.onerror = () => img.remove();
+      chip.append(img);
+    }
+    chip.append(el('span', '', g.name));
+    chips.append(chip);
+    if (shared.length > 1) chips.append(el('span', 'guild-more', `+${shared.length - 1}`));
+    main.append(chips);
+  }
 
   const actions = el('div', 'lr-actions');
   const join = el('button', 'primary small', 'Entrar');
@@ -981,8 +1002,25 @@ function renderLobby(): void {
   }
   if (!on) return;
 
+  // Filtro por servidor do Discord: só os servidores que têm alguma sala aberta agora.
+  const withRooms = lobbyState.guilds.filter((g) => lobbyState.rooms.some((r) => r.guilds.includes(g.id)));
+  const filter = $<HTMLSelectElement>('lobby-filter');
+  if (lobbyFilter && !withRooms.some((g) => g.id === lobbyFilter)) lobbyFilter = '';
+  filter.hidden = !withRooms.length;
+  filter.replaceChildren(
+    Object.assign(el('option', '', 'Todas as salas'), { value: '' }),
+    ...withRooms.map((g) => Object.assign(el('option', '', g.name), { value: g.id })),
+  );
+  filter.value = lobbyFilter;
+  // Primeiro as salas de quem está num servidor seu; dentro disso, a ordem do servidor (mais gente primeiro).
+  const rooms = lobbyState.rooms
+    .filter((r) => !lobbyFilter || r.guilds.includes(lobbyFilter))
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => Number(b.r.guilds.length > 0) - Number(a.r.guilds.length > 0) || a.i - b.i)
+    .map((x) => x.r);
+
   const st = lobbyState.status;
-  const n = lobbyState.rooms.length;
+  const n = rooms.length;
   $('lobby-status').textContent = st === 'online' ? (n === 1 ? '1 sala' : `${n} salas`) : st === 'offline' ? 'sem conexão, tentando de novo…' : 'conectando…';
   $('lobby-empty').hidden = st !== 'online' || n > 0;
   $('lobby-list').hidden = n === 0;
@@ -994,7 +1032,7 @@ function renderLobby(): void {
     if (input.value) typed.set(code, input.value);
     if (document.activeElement === input) focused = code;
   }
-  $('lobby-list').replaceChildren(...lobbyState.rooms.map(lobbyRoomItem));
+  $('lobby-list').replaceChildren(...rooms.map(lobbyRoomItem));
   for (const li of document.querySelectorAll<HTMLElement>('#lobby-list li')) {
     const input = li.querySelector('input');
     const code = li.dataset.code ?? '';
@@ -1011,6 +1049,10 @@ function startLogin(provider: string): void {
     $('login-wait').hidden = false;
   });
 }
+$<HTMLSelectElement>('lobby-filter').onchange = (e) => {
+  lobbyFilter = (e.target as HTMLSelectElement).value;
+  renderLobby();
+};
 $('btn-login-again').onclick = () => lastProvider && startLogin(lastProvider);
 $('btn-logout').onclick = () => {
   if (room) return toast('Saia da sala antes de sair da conta.');

@@ -245,6 +245,24 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   if (r.live) title.append(el('span', 'lr-live', 'AO VIVO'));
   const sub = el('div', 'lr-sub');
   sub.append(avatar(r.host, 'avatar small'), el('span', '', `${r.count} ${r.count === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`));
+  // Servidor do Discord em comum com quem hospeda.
+  const shared = r.guilds.map((id) => lobby.state.guilds.find((g) => g.id === id)).filter((g): g is NonNullable<typeof g> => !!g);
+  let chips: HTMLElement | null = null;
+  if (shared.length) {
+    chips = el('div', 'lr-guilds');
+    const chip = el('span', 'guild-chip');
+    if (shared[0].icon) {
+      const img = el('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.src = shared[0].icon;
+      img.onerror = () => img.remove();
+      chip.append(img);
+    }
+    chip.append(el('span', '', shared[0].name));
+    chips.append(chip);
+    if (shared.length > 1) chips.append(el('span', 'muted', `+${shared.length - 1}`));
+  }
   const actions = el('div', 'lr-actions');
   const join = el('button', 'primary', 'Entrar');
   join.type = 'button';
@@ -269,7 +287,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
     };
   }
   actions.append(join);
-  li.append(title, sub, actions);
+  li.append(title, sub, ...(chips ? [chips] : []), actions);
   return li;
 }
 
@@ -310,7 +328,12 @@ function renderLobby(): void {
   }
   if (!on) return;
   const st = lobby.state.status;
-  const n = lobby.state.rooms.length;
+  // Primeiro as salas de quem está num servidor do Discord seu.
+  const rooms = lobby.state.rooms
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => Number(b.r.guilds.length > 0) - Number(a.r.guilds.length > 0) || a.i - b.i)
+    .map((x) => x.r);
+  const n = rooms.length;
   $('lobby-status').textContent = st === 'online' ? `· ${n}` : st === 'offline' ? '· sem conexão' : '· conectando…';
   $('lobby-empty').hidden = st !== 'online' || n > 0;
   // A lista é refeita a cada mudança: guarda a senha que estava sendo digitada.
@@ -319,7 +342,7 @@ function renderLobby(): void {
     const code = input.closest<HTMLElement>('li')?.dataset.code ?? '';
     if (input.value) typed.set(code, input.value);
   }
-  $('lobby-list').replaceChildren(...lobby.state.rooms.map(lobbyRoomItem));
+  $('lobby-list').replaceChildren(...rooms.map(lobbyRoomItem));
   for (const li of document.querySelectorAll<HTMLElement>('#lobby-list li')) {
     const input = li.querySelector('input');
     if (input) input.value = typed.get(li.dataset.code ?? '') ?? '';

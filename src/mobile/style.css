@@ -151,3 +151,8 @@ label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; acce
 .update-bar { display: flex; align-items: center; gap: 12px; padding: 12px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--accent2); border-radius: 12px; }
 .update-bar span { flex: 1; font-size: 14px; }
 .update-bar button { flex: none; }
+.lr-guilds { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.guild-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 3px; border-radius: 99px; background: rgba(88, 101, 242, .18); color: #c9cdfb; font-size: 12px; font-weight: 600; max-width: 75%; }
+.guild-chip:not(:has(img)) { padding-left: 9px; }
+.guild-chip img { width: 18px; height: 18px; border-radius: 50%; }
+.guild-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
