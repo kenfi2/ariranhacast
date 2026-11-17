@@ -3,9 +3,8 @@
 <!--
   Este arquivo vira a página "Novidades" do app (PC e Android) e o texto da release no GitHub.
 
-  Para lançar uma versão: escreva a seção dela aqui em cima (opcional) e mude "version" no
-  package.json. Se a seção não existir, o build monta uma sozinho com os títulos dos commits
-  desde a versão anterior — então nada trava, mas escrever à mão fica mais claro para os amigos.
+  Para lançar uma versão: escreva a seção dela aqui em cima e mude "version" no package.json.
+  Sem a seção, a release não sai (o GitHub Actions para com um erro explicando).
 
   Formato:  "## X.Y.Z (DD/MM/AAAA)" e, abaixo, uma linha "- " por novidade.
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.

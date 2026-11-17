@@ -11,13 +11,14 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { checkObs } from './check-obs.mjs';
 import { hardenExe } from './harden-exe.mjs';
-import { loadChangelog } from './changelog.mjs';
+import { entryFor } from './changelog.mjs';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const version = pkg.version;
 const updateUrl = String(pkg.ariranhacast?.updateUrl ?? '');
 if (updateUrl && !updateUrl.startsWith('https://')) throw new Error('ariranhacast.updateUrl precisa começar com https://');
 
+entryFor(version); // sem novidades escritas no CHANGELOG.md não há release
 checkObs(); // arquivos do OBS da captura de jogo: iguais aos registrados?
 
 // 1. Pasta do app (Electron + nosso código), com o executável endurecido.
@@ -95,8 +96,7 @@ const hash = (file, algo, enc) => createHash(algo).update(readFileSync(file)).di
 const setupPath = join('release', setup);
 if (updateUrl) {
   // As novidades desta versão vão no latest.yml: o app mostra "O que mudou" antes de reiniciar.
-  const entry = loadChangelog(version).find((e) => e.version === version);
-  const notes = (entry?.items ?? []).map((i) => `- ${i.only === 'pc' ? 'PC: ' : i.only === 'android' ? 'Android: ' : ''}${i.text}`).join('\n');
+  const notes = entryFor(version).items.map((i) => `- ${i.only === 'pc' ? 'PC: ' : i.only === 'android' ? 'Android: ' : ''}${i.text}`).join('\n');
   const sha512 = hash(setupPath, 'sha512', 'base64');
   writeFileSync(
     join('release', 'latest.yml'),

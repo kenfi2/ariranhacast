@@ -31,8 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # histórico e tags: as Novidades usam os commits se faltar seção no CHANGELOG.md
 
       - name: Versão a publicar
         id: ver
@@ -66,6 +64,10 @@ jobs:
       - name: Ferramentas do instalador (NSIS e zip)
         if: steps.ver.outputs.skip != 'true'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nsis zip
+
+      - name: Novidades escritas no CHANGELOG.md
+        if: steps.ver.outputs.skip != 'true'
+        run: node scripts/changelog.mjs check
 
       - if: steps.ver.outputs.skip != 'true'
         run: npm ci
@@ -106,8 +108,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # histórico e tags: as Novidades usam os commits se faltar seção no CHANGELOG.md
 
       - uses: actions/setup-node@v4
         with:
@@ -173,7 +173,8 @@ jobs:
             import { loadChangelog } from './scripts/changelog.mjs';
             import { writeFileSync } from 'node:fs';
             const e = loadChangelog(process.env.V).find((x) => x.version === process.env.V);
-            const notes = (e?.items ?? []).map((i) => (i.only === 'pc' ? 'PC: ' : i.only === 'android' ? 'Android: ' : '') + i.text);
+            if (!e) throw new Error('CHANGELOG.md sem a seção da versão');
+            const notes = e.items.map((i) => (i.only === 'pc' ? 'PC: ' : i.only === 'android' ? 'Android: ' : '') + i.text);
             writeFileSync('latest-android.json', JSON.stringify({ version: process.env.V, apk: process.env.APK, sha256: process.env.SHA, notes }) + '\n');
           "
           cat latest-android.json

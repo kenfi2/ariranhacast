@@ -8,7 +8,6 @@ export interface ChangeEntry {
   version: string;
   date: string;
   items: ChangeItem[];
-  auto?: boolean; // montada a partir dos commits (sem seção no CHANGELOG.md)
 }
 
 export function newerVersion(a: string, b: string): boolean {
