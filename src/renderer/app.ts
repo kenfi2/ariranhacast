@@ -374,6 +374,7 @@ function show(view: 'home' | 'room'): void {
   $('view-room').hidden = view !== 'room';
   // Na tela inicial com uma chamada aberta: a faixa para voltar e a lista marcando a sala atual.
   $('back-bar').hidden = view !== 'home' || !room;
+  $('btn-top-back').hidden = view !== 'room';
   if (view === 'home' && room) {
     $('back-name').textContent = roomTitle || room.code;
     renderLobby();
@@ -697,7 +698,7 @@ $('btn-copy').onclick = async () => {
 $('room-code').title = 'Clique para copiar o código';
 $('room-code').onclick = () => $('btn-copy').click();
 $('btn-panel').onclick = () => ($('room-side').hidden = !$('room-side').hidden);
-$('btn-rooms').onclick = () => show('home');
+$('btn-top-back').onclick = () => show('home');
 $('btn-back').onclick = () => show('room');
 
 // ---------- barra de controles ----------
@@ -1002,16 +1003,7 @@ function renderLobby(): void {
   }
   if (!on) return;
 
-  // Filtro por servidor do Discord: só os servidores que têm alguma sala aberta agora.
-  const withRooms = lobbyState.guilds.filter((g) => lobbyState.rooms.some((r) => r.guilds.includes(g.id)));
-  const filter = $<HTMLSelectElement>('lobby-filter');
-  if (lobbyFilter && !withRooms.some((g) => g.id === lobbyFilter)) lobbyFilter = '';
-  filter.hidden = !withRooms.length;
-  filter.replaceChildren(
-    Object.assign(el('option', '', 'Todas as salas'), { value: '' }),
-    ...withRooms.map((g) => Object.assign(el('option', '', g.name), { value: g.id })),
-  );
-  filter.value = lobbyFilter;
+  renderGuildRail();
   // Primeiro as salas de quem está num servidor seu; dentro disso, a ordem do servidor (mais gente primeiro).
   const rooms = lobbyState.rooms
     .filter((r) => !lobbyFilter || r.guilds.includes(lobbyFilter))
@@ -1049,10 +1041,62 @@ function startLogin(provider: string): void {
     $('login-wait').hidden = false;
   });
 }
-$<HTMLSelectElement>('lobby-filter').onchange = (e) => {
-  lobbyFilter = (e.target as HTMLSelectElement).value;
-  renderLobby();
-};
+/**
+ * Barra de servidores à esquerda (como no Discord): "Todas" e os seus servidores, primeiro os que
+ * têm salas abertas (com a quantidade). Clicar filtra a lista; clicar de novo volta para todas.
+ */
+const ALL_ICON = '<path d="M4 10.5L12 4l8 6.5V20h-5.5v-5.5h-5V20H4z"/>';
+function renderGuildRail(): void {
+  const rail = $('guild-rail');
+  const guilds = lobbyState.guilds;
+  if (lobbyFilter && !guilds.some((g) => g.id === lobbyFilter)) lobbyFilter = '';
+  rail.hidden = !guilds.length;
+  document.body.classList.toggle('has-rail', guilds.length > 0);
+  const count = (id: string) => lobbyState.rooms.filter((r) => r.guilds.includes(id)).length;
+  const sorted = guilds
+    .map((g, i) => ({ g, i, n: count(g.id) }))
+    .sort((a, b) => b.n - a.n || a.i - b.i);
+  const item = (id: string, name: string, n: number, body: (b: HTMLButtonElement) => void): HTMLButtonElement => {
+    const b = el('button', 'rail-item');
+    b.type = 'button';
+    b.title = n ? `${name} · ${n === 1 ? '1 sala aberta' : `${n} salas abertas`}` : name;
+    b.classList.toggle('on', lobbyFilter === id);
+    b.classList.toggle('has-rooms', n > 0);
+    body(b);
+    if (n) b.append(el('span', 'rail-badge', String(n)));
+    b.onclick = () => {
+      lobbyFilter = lobbyFilter === id ? '' : id;
+      renderLobby();
+    };
+    return b;
+  };
+  rail.replaceChildren(
+    item('', 'Todas as salas', 0, (b) => {
+      b.classList.add('rail-all');
+      b.innerHTML = svg(ALL_ICON);
+    }),
+    el('div', 'rail-sep'),
+    ...sorted.map(({ g, n }) =>
+      item(g.id, g.name, n, (b) => {
+        const initials = () => {
+          b.prepend(el('span', 'rail-initials', g.name.split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 3)));
+        };
+        if (g.icon) {
+          const img = el('img');
+          img.alt = '';
+          img.referrerPolicy = 'no-referrer';
+          img.src = g.icon;
+          img.onerror = () => {
+            img.remove();
+            initials();
+          };
+          b.append(img);
+        } else initials();
+      }),
+    ),
+  );
+  $('lobby-scope').textContent = lobbyFilter ? ` · ${guilds.find((g) => g.id === lobbyFilter)?.name ?? ''}` : '';
+}
 $('btn-login-again').onclick = () => lastProvider && startLogin(lastProvider);
 $('btn-logout').onclick = () => {
   if (room) return toast('Saia da sala antes de sair da conta.');
