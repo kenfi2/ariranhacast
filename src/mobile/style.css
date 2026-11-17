@@ -146,3 +146,8 @@ label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; acce
 .lr-actions input { margin: 0; flex: 1; padding: 10px; }
 .lr-actions button { flex: none; min-width: 96px; }
 .lr-actions button:only-child { flex: 1; }
+
+/* atualização do app */
+.update-bar { display: flex; align-items: center; gap: 12px; padding: 12px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--accent2); border-radius: 12px; }
+.update-bar span { flex: 1; font-size: 14px; }
+.update-bar button { flex: none; }

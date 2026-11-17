@@ -10,12 +10,14 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import android.view.Window;
 import android.view.WindowManager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -24,6 +26,14 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 /**
@@ -222,5 +232,125 @@ public class CallPlugin extends Plugin {
         JSObject o = new JSObject();
         o.put("url", data);
         notifyListeners("appLink", o, true);
+    }
+
+    // ---------- atualização do APK ----------
+    // A página consulta o latest-android.json da última release e, se houver versão nova, pede
+    // para baixar: o APK é conferido pelo SHA-256 antes de abrir o instalador do Android (que só
+    // aceita se a assinatura for a mesma do app instalado).
+
+    private static final long MAX_APK = 300L * 1024 * 1024;
+    private volatile boolean downloading = false;
+
+    private static HttpURLConnection open(String url) throws Exception {
+        if (url == null || !url.startsWith("https://")) throw new Exception("url inválida");
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(30000);
+        c.setInstanceFollowRedirects(true); // a GitHub redireciona para o servidor de arquivos (https → https)
+        c.setRequestProperty("User-Agent", "AriranhaCast-Android");
+        int code = c.getResponseCode();
+        if (code != 200) throw new Exception("HTTP " + code);
+        return c;
+    }
+
+    /** Baixa um texto pequeno (o latest-android.json). Feito aqui porque a página não tem CORS para a GitHub. */
+    @PluginMethod
+    public void fetchText(PluginCall call) {
+        String url = call.getString("url");
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = open(url);
+                try (InputStream in = c.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                        if (out.size() > 64 * 1024) throw new Exception("resposta grande demais");
+                    }
+                    JSObject r = new JSObject();
+                    r.put("text", new String(out.toByteArray(), StandardCharsets.UTF_8));
+                    call.resolve(r);
+                } finally {
+                    c.disconnect();
+                }
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        }).start();
+    }
+
+    /** Baixa o APK, confere o SHA-256 e abre o instalador do Android. */
+    @PluginMethod
+    public void installUpdate(PluginCall call) {
+        String url = call.getString("url");
+        String sha = call.getString("sha256", "");
+        if (sha == null || !sha.matches("^[0-9a-f]{64}$")) {
+            call.reject("sha256 inválido");
+            return;
+        }
+        Context ctx = getContext();
+        // Android 8+: o usuário precisa permitir que o AriranhaCast instale apps (uma vez só).
+        if (Build.VERSION.SDK_INT >= 26 && !ctx.getPackageManager().canRequestPackageInstalls()) {
+            Intent i = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            call.reject("Permita \"Instalar apps desconhecidos\" para o AriranhaCast e toque em Atualizar de novo.", "NEEDS_PERMISSION");
+            return;
+        }
+        if (downloading) {
+            call.reject("O download já está em andamento.");
+            return;
+        }
+        downloading = true;
+        new Thread(() -> {
+            File dir = new File(ctx.getCacheDir(), "updates");
+            File apk = new File(dir, "AriranhaCast.apk");
+            try {
+                dir.mkdirs();
+                File[] old = dir.listFiles();
+                if (old != null) for (File f : old) f.delete();
+                HttpURLConnection c = open(url);
+                long total = c.getContentLengthLong();
+                if (total > MAX_APK) throw new Exception("arquivo grande demais");
+                MessageDigest md = MessageDigest.getInstance("SHA-256");
+                long done = 0;
+                int lastPct = -1;
+                try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                        md.update(buf, 0, n);
+                        done += n;
+                        if (done > MAX_APK) throw new Exception("arquivo grande demais");
+                        int pct = total > 0 ? (int) (done * 100 / total) : -1;
+                        if (pct != lastPct) {
+                            lastPct = pct;
+                            JSObject p = new JSObject();
+                            p.put("percent", pct);
+                            notifyListeners("updateProgress", p);
+                        }
+                    }
+                } finally {
+                    c.disconnect();
+                }
+                StringBuilder hex = new StringBuilder();
+                for (byte b : md.digest()) hex.append(String.format("%02x", b));
+                if (!hex.toString().equals(sha)) throw new Exception("o arquivo baixado não confere (SHA-256 diferente)");
+
+                Uri uri = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".fileprovider", apk);
+                Intent i = new Intent(Intent.ACTION_VIEW);
+                i.setDataAndType(uri, "application/vnd.android.package-archive");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(i);
+                call.resolve();
+            } catch (Exception e) {
+                apk.delete();
+                call.reject(String.valueOf(e.getMessage()));
+            } finally {
+                downloading = false;
+            }
+        }).start();
     }
 }

@@ -12,6 +12,9 @@ interface CallPlugin {
   addListener(event: 'appLink', cb: (e: { url: string }) => void): Promise<{ remove(): Promise<void> }>;
   openUrl(o: { url: string }): Promise<void>;
   takeLaunchLink(): Promise<{ url?: string }>;
+  fetchText(o: { url: string }): Promise<{ text: string }>;
+  installUpdate(o: { url: string; sha256: string }): Promise<void>;
+  addListener(event: 'updateProgress', cb: (e: { percent: number }) => void): Promise<{ remove(): Promise<void> }>;
 }
 
 const Call = registerPlugin<CallPlugin>('Call');
@@ -75,4 +78,21 @@ export function onAppLink(cb: (url: string) => void): void {
   void Call.takeLaunchLink()
     .then((r) => r.url && cb(r.url))
     .catch(() => {});
+}
+
+/** Texto pequeno de uma URL https, baixado pelo Android (sem CORS). */
+export async function fetchText(url: string): Promise<string> {
+  if (!native) throw new Error('só no app Android');
+  return (await Call.fetchText({ url })).text;
+}
+
+/** Baixa o APK novo, confere o SHA-256 e abre o instalador do Android. */
+export async function installUpdate(url: string, sha256: string, onProgress: (pct: number) => void): Promise<void> {
+  if (!native) throw new Error('só no app Android');
+  const sub = await Call.addListener('updateProgress', (e) => onProgress(Number(e?.percent ?? -1)));
+  try {
+    await Call.installUpdate({ url, sha256 });
+  } finally {
+    void sub.remove();
+  }
 }

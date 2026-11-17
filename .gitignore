@@ -5,3 +5,5 @@ release/
 mobile/www/
 .wrangler/
 .dev.vars*
+*.jks
+*.keystore
