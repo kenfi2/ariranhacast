@@ -548,7 +548,7 @@ async function enterRoom(create: boolean, code?: string, password = '', title = 
     $<HTMLInputElement>('create-limit').value = String(limit);
     localStorage.setItem('ariranhacast.limit', String(limit));
   }
-  const r = new Room(settings, appVersion || '0', password, limit);
+  const r = new Room(settings, appVersion || '0', password, limit, lobbyState.user?.avatar ?? '');
   my.room = r;
   try {
     if (create) await r.create(code);
@@ -1486,11 +1486,20 @@ function renderTiles(): void {
     setVideo(ut, camStream, true);
     // A sua webcam aparece espelhada para você (como no Discord/espelho); os outros recebem normal.
     ut.video.classList.toggle('mirror', p.id === me);
-    const userMode = `avatar:${room.isHost && p.id !== me}`;
+    const userMode = `avatar:${room.isHost && p.id !== me}:${p.avatar}`;
     if (ut.mode !== userMode) {
       ut.mode = userMode;
+      // Foto da conta (Discord/Google) quando tem; senão a inicial colorida.
       const avatar = el('div', 'avatar', p.name.trim().charAt(0).toUpperCase() || '?');
       avatar.style.background = color(p.id);
+      if (p.avatar) {
+        const img = el('img');
+        img.alt = '';
+        img.referrerPolicy = 'no-referrer';
+        img.onerror = () => img.remove();
+        img.src = p.avatar;
+        avatar.append(img);
+      }
       ut.body.replaceChildren(avatar);
       ut.tools.replaceChildren();
       if (room.isHost && p.id !== me) {

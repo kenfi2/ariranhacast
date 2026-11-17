@@ -747,3 +747,6 @@ dialog#dlg-join { width: 420px; padding: 24px 26px; }
 .panel-toggle.closed svg { transform: rotate(180deg); }
 .side-head { padding-right: 34px; min-height: 30px; }
 #btn-start.busy { display: flex; }
+/* foto da conta nos cartões da chamada */
+.tile .avatar { position: relative; overflow: hidden; }
+.tile .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

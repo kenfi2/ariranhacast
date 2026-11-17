@@ -29,6 +29,22 @@ const str = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\p
 
 const randomHex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
 
+/**
+ * Foto da conta: só endereços https das contas de onde ela vem (Discord e Google). Qualquer outra
+ * coisa vira '' (sem foto); a página também só carrega imagens desses endereços (CSP).
+ */
+export function safeAvatar(v: unknown): string {
+  const s = str(v, 300);
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    const ok = u.protocol === 'https:' && (u.hostname === 'cdn.discordapp.com' || u.hostname.endsWith('.googleusercontent.com'));
+    return ok ? u.href : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Tudo o que chega pela rede é tratado como dado não confiável. */
 function cleanRoster(raw: unknown): RosterEntry[] {
   if (!Array.isArray(raw)) return [];
@@ -47,6 +63,7 @@ function cleanRoster(raw: unknown): RosterEntry[] {
       title: str((p as any).title, 80),
       muted: (p as any).muted === true,
       deaf: (p as any).deaf === true,
+      avatar: safeAvatar((p as any).avatar),
     });
   }
   return out;
@@ -117,9 +134,10 @@ export class Room {
     private version: string,
     private password = '',
     limit: number = DEFAULT_LIMIT,
+    avatar = '',
   ) {
     this.limit = clampLimit(limit);
-    this.self = { id: '', name: settings.name.slice(0, 24) || 'Convidado', cam: false, screen: false, title: '', muted: true, deaf: false };
+    this.self = { id: '', name: settings.name.slice(0, 24) || 'Convidado', cam: false, screen: false, title: '', muted: true, deaf: false, avatar: safeAvatar(avatar) };
   }
 
   get selfId(): string {
@@ -267,7 +285,7 @@ export class Room {
         this.members.get(conn.peer)?.conn.close(); // reconexão do mesmo participante
         member = {
           conn,
-          entry: { id: conn.peer, name: str(msg.name, 24) || 'Convidado', cam: false, screen: false, title: '', muted: false, deaf: false },
+          entry: { id: conn.peer, name: str(msg.name, 24) || 'Convidado', cam: false, screen: false, title: '', muted: false, deaf: false, avatar: safeAvatar(msg.avatar) },
         };
         this.members.set(conn.peer, member);
         this.pending.delete(conn.peer);
@@ -561,7 +579,7 @@ export class Room {
         if (!settled) {
           if (msg.t === 'challenge') {
             const auth = this.password && typeof msg.nonce === 'string' ? await proof(this.password, msg.nonce.slice(0, 64), this.code) : '';
-            conn.send({ t: 'hello', name: this.self.name, proto: PROTO, version: this.version, auth, cnonce } satisfies Msg);
+            conn.send({ t: 'hello', name: this.self.name, avatar: this.self.avatar || undefined, proto: PROTO, version: this.version, auth, cnonce } satisfies Msg);
           } else if (msg.t === 'reject') {
             const theirs = str(msg.version, 16);
             const reason =

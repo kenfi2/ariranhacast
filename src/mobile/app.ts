@@ -541,7 +541,7 @@ async function enter(create: boolean, code?: string, password = '', title = ''):
     localStorage.setItem('ariranhacast.limit', String(limit));
     $<HTMLInputElement>('room-limit').value = String(limit);
   }
-  const r = new Room(cfg, VERSION, password, limit);
+  const r = new Room(cfg, VERSION, password, limit, lobby.state.user?.avatar ?? '');
   my.room = r;
   try {
     if (create) await r.create();
