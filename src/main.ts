@@ -588,8 +588,9 @@ function cleanPublished(raw: unknown): PublishedRoom | null {
     code: r.code.toUpperCase(),
     name: text(r.name, 40),
     locked: r.locked === true,
-    count: Math.max(1, int(r.count, 16)),
-    members: Array.isArray(r.members) ? r.members.slice(0, 16).map((m) => text(m, 24)).filter(Boolean) : [],
+    count: Math.max(1, int(r.count, 50)),
+    max: Number.isInteger(r.max) ? Math.min(50, Math.max(2, r.max as number)) : 16,
+    members: Array.isArray(r.members) ? r.members.slice(0, 20).map((m) => text(m, 24)).filter(Boolean) : [],
     live: int(r.live, 16),
     proto: int(r.proto, 1000),
   };
