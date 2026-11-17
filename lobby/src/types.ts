@@ -23,6 +23,16 @@ export type User = {
   provider: string;
 };
 
+/** Alguém online no lobby, como outra pessoa vê (só aparece quem tem servidor do Discord em comum). */
+export type Online = {
+  id: string;
+  name: string;
+  avatar: string | null;
+  room: string | null; // código da sala em que está, ou null (na tela inicial)
+  devices: string[]; // "pc", "android"
+  guilds: string[]; // servidores em comum
+};
+
 /** Sala listada no lobby. Quem hospeda publica; some quando o WebSocket de quem hospeda fecha. */
 export type Room = {
   code: string; // código da sala (PeerJS)

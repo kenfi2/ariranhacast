@@ -218,6 +218,7 @@ function avatar(user: { id: string; name: string; avatar: string | null }, cls: 
 
 function publishLobby(): void {
   if (!lobbyOn()) return;
+  lobby.setPresence(room?.code ?? null, 'android'); // aparece no "Online agora" de quem tem servidor em comum
   let data: PublishedRoom | null = null;
   if (room?.isHost && room.code) {
     data = {
@@ -352,6 +353,7 @@ function renderLobby(): void {
 let hadUser = false;
 lobby.onchange = (st) => {
   if (st.status === 'online') publishedKey = 'null'; // reconectou: o cliente já republica o que hospedamos
+  publishLobby();
   renderLobby();
   if (!hadUser && st.user) {
     $('login-wait').hidden = true;

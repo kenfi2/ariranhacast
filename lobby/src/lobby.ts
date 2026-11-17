@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
-import type { Env, Guild, Room, User } from "./types";
+import type { Env, Guild, Online, Room, User } from "./types";
 
-type Attachment = { user: User; room?: Room };
+/** room = sala publicada (só quem hospeda); at/device = onde a pessoa está (todo mundo informa). */
+type Attachment = { user: User; room?: Room; at?: string | null; device?: string };
 
 const SESSION_TTL_MS = 60 * 24 * 3600_000; // 60 dias sem precisar logar de novo
 const MAX_MESSAGE = 4096;
@@ -121,7 +122,9 @@ export class Lobby extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ user } satisfies Attachment);
     const guilds = this.guildsOf(user.id);
-    server.send(JSON.stringify({ type: "welcome", user, guilds, rooms: this.roomsFor(user, this.rooms(), new Map()) }));
+    const cache = new Map<string, Set<string>>();
+    server.send(JSON.stringify({ type: "welcome", user, guilds, rooms: this.roomsFor(user, this.rooms(), cache), online: this.onlineFor(user, cache) }));
+    this.broadcastRooms(undefined, server); // os outros veem que esta pessoa ficou online
 
     return new Response(null, {
       status: 101,
@@ -165,16 +168,25 @@ export class Lobby extends DurableObject<Env> {
         };
         // Só reenvia a lista se algo visível mudou.
         const changed = !prev || JSON.stringify({ ...prev, updatedAt: 0 }) !== JSON.stringify({ ...room, updatedAt: 0 });
-        ws.serializeAttachment({ user: att.user, room } satisfies Attachment);
+        ws.serializeAttachment({ ...att, room } satisfies Attachment);
         if (changed) this.broadcastRooms();
         if (!prev) await this.announceOpen(room);
         break;
       }
       case "close_room": {
         if (att.room) {
-          ws.serializeAttachment({ user: att.user } satisfies Attachment);
+          ws.serializeAttachment({ ...att, room: undefined } satisfies Attachment);
           this.broadcastRooms();
         }
+        break;
+      }
+      // Onde a pessoa está agora (sala em que entrou, ou nenhuma) e de que aparelho.
+      case "presence": {
+        const at = typeof msg.room === "string" && CODE_RE.test(msg.room.toUpperCase()) ? msg.room.toUpperCase() : null;
+        const device = msg.device === "android" ? "android" : "pc";
+        if (att.at === at && att.device === device) break;
+        ws.serializeAttachment({ ...att, at, device } satisfies Attachment);
+        this.broadcastRooms();
         break;
       }
       default:
@@ -225,16 +237,47 @@ export class Lobby extends DurableObject<Env> {
     });
   }
 
-  private broadcastRooms(except?: WebSocket): void {
-    const rooms = this.rooms(except);
+  /**
+   * "Online agora" como `viewer` vê: quem está conectado ao lobby e tem algum servidor do Discord
+   * em comum com ele (cada conta uma vez, juntando PC e celular). Sem servidor em comum, não aparece.
+   */
+  private onlineFor(viewer: User, cache: Map<string, Set<string>>, gone?: WebSocket): Online[] {
+    const ids = (userId: string) => {
+      let set = cache.get(userId);
+      if (!set) cache.set(userId, (set = new Set(this.guildsOf(userId).map((g) => g.id))));
+      return set;
+    };
+    const mine = ids(viewer.id);
+    if (!mine.size) return [];
+    const byUser = new Map<string, Online>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === gone) continue;
+      const a = ws.deserializeAttachment() as Attachment | null;
+      if (!a?.user || a.user.id === viewer.id) continue;
+      let o = byUser.get(a.user.id);
+      if (!o) {
+        const shared = [...ids(a.user.id)].filter((g) => mine.has(g));
+        if (!shared.length) continue;
+        byUser.set(a.user.id, (o = { id: a.user.id, name: a.user.name, avatar: a.user.avatar, room: null, devices: [], guilds: shared.slice(0, 10) }));
+      }
+      const device = a.device ?? "pc";
+      if (!o.devices.includes(device)) o.devices.push(device);
+      o.room ??= a.at ?? a.room?.code ?? null;
+    }
+    return [...byUser.values()].sort((x, y) => Number(!!y.room) - Number(!!x.room) || x.name.localeCompare(y.name, "pt-BR")).slice(0, 100);
+  }
+
+  /** Manda a lista de salas e o "online agora" para todos. `gone` = conexão que está fechando; `skip` = não enviar para ela. */
+  private broadcastRooms(gone?: WebSocket, skip?: WebSocket): void {
+    const rooms = this.rooms(gone);
     const cache = new Map<string, Set<string>>();
     const perUser = new Map<string, string>();
     for (const ws of this.ctx.getWebSockets()) {
-      if (ws === except) continue;
+      if (ws === gone || ws === skip) continue;
       const user = (ws.deserializeAttachment() as Attachment | null)?.user;
       if (!user) continue;
       let msg = perUser.get(user.id);
-      if (!msg) perUser.set(user.id, (msg = JSON.stringify({ type: "rooms", rooms: this.roomsFor(user, rooms, cache) })));
+      if (!msg) perUser.set(user.id, (msg = JSON.stringify({ type: "rooms", rooms: this.roomsFor(user, rooms, cache), online: this.onlineFor(user, cache, gone) })));
       try {
         ws.send(msg);
       } catch {
