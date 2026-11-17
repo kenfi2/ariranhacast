@@ -102,19 +102,10 @@ app.commandLine.appendSwitch(
 const disabled = ['WebRtcHideLocalIpsWithMdns', 'WebRtcWgcRequireBorder'];
 if (gfx.capture !== 'wgc') disabled.push('AllowWgcScreenCapturer');
 if (gfx.capture === 'compat') disabled.push('AllowWgcWindowCapturer');
-// Cálculo de oclusão nativo do Chromium: para saber se a janela está coberta, ele observa os eventos
-// de TODAS as janelas do Windows (mover, mostrar, trocar de foco…) e refaz a conta a cada um. Com o
-// Alt+Tab isso vira uma enxurrada de trabalho a cada troca, e o Alt+Tab do sistema inteiro ficava
-// lento com o app aberto. O app nunca quer ser "pausado" por estar coberto (switches abaixo), então
-// esse cálculo não serve para nada aqui. Para comparar em desenvolvimento: --lc-occlusion=1 religa.
-if (arg('occlusion') !== '1') disabled.push('CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('disable-features', disabled.join(','));
-// Em desenvolvimento, --lc-bgswitches=0 tira estes três (só para testes de desempenho).
-if (arg('bgswitches') !== '0') {
-  app.commandLine.appendSwitch('disable-renderer-backgrounding');
-  app.commandLine.appendSwitch('disable-background-timer-throttling');
-  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-}
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
