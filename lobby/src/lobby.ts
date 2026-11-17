@@ -171,7 +171,12 @@ export class Lobby extends DurableObject<Env> {
         const changed = !prev || JSON.stringify({ ...prev, updatedAt: 0 }) !== JSON.stringify({ ...room, updatedAt: 0 });
         ws.serializeAttachment({ ...att, room } satisfies Attachment);
         if (changed) this.broadcastRooms();
-        if (!prev) await this.announceOpen(room);
+        if (!prev) {
+          // "Não avisar no Discord": marca como já anunciada, sem mensagem. Assim também não avisa
+          // quando outra pessoa assume a sala ou quando quem hospeda reconecta.
+          if (msg.quiet === true) this.markQuiet(room);
+          else await this.announceOpen(room);
+        }
         break;
       }
       case "close_room": {
@@ -357,6 +362,12 @@ export class Lobby extends DurableObject<Env> {
     this.ctx.storage.sql.exec("INSERT INTO announced(code, message_id, name, host, gone_since) VALUES (?, NULL, ?, ?, NULL)", room.code, room.name, room.host.name);
     const msg = await this.send("POST", "?wait=true", this.openText(room.code, room.name, room.host.name, room.locked));
     if (msg?.id && /^\d+$/.test(msg.id)) this.ctx.storage.sql.exec("UPDATE announced SET message_id = ? WHERE code = ?", msg.id, room.code);
+  }
+
+  /** Sala que pediu para não ser anunciada: entra na tabela sem id de mensagem (nada é enviado nem apagado). */
+  private markQuiet(room: Room): void {
+    if (!this.webhook()) return;
+    this.ctx.storage.sql.exec("INSERT OR IGNORE INTO announced(code, message_id, name, host, gone_since) VALUES (?, NULL, ?, ?, NULL)", room.code, room.name, room.host.name);
   }
 
   /** Salas anunciadas que sumiram da lista: marca a hora e agenda a confirmação. */

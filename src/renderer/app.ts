@@ -561,6 +561,7 @@ async function enterRoom(create: boolean, code?: string, password = '', title = 
   endAttempt(my);
   room = r;
   roomTitle = title.trim() || lobbyState.rooms.find((x) => x.code === r.code)?.name || '';
+  roomQuiet = create && !$<HTMLInputElement>('create-announce').checked;
   const inRoomNow = (id: string) => r.isMember(id);
   voice = new Voice(r.peer, settings.name, inRoomNow);
   cams = new Cams(r.peer, inRoomNow);
@@ -646,6 +647,7 @@ function leaveRoom(reason?: string): void {
   room.leave();
   room = null;
   roomTitle = '';
+  roomQuiet = false;
   publishLobby(); // tira a sala da lista (se éramos nós que hospedávamos)
   syncPresence();
   voice = null;
@@ -750,6 +752,11 @@ const stepLimit = (d: number): void => {
 $('limit-dec').onclick = () => stepLimit(-1);
 $('limit-inc').onclick = () => stepLimit(1);
 $('create-limit').onchange = () => stepLimit(0);
+{
+  const box = $<HTMLInputElement>('create-announce');
+  box.checked = localStorage.getItem('ariranhacast.announce') !== '0';
+  box.onchange = () => localStorage.setItem('ariranhacast.announce', box.checked ? '1' : '0');
+}
 $('btn-create').onclick = () => {
   $<HTMLDialogElement>('dlg-create').close();
   void enterRoom(true, undefined, $<HTMLInputElement>('create-pass').value, $<HTMLInputElement>('create-name').value);
@@ -923,6 +930,7 @@ let lobbySearch = ''; // texto da busca na lista de salas
 let pendingInvite = '';
 let lastProvider = '';
 let roomTitle = ''; // nome da sala atual, como aparece na lista
+let roomQuiet = false; // sala criada sem aviso no canal do Discord
 let publishedKey = 'null';
 
 /** Testes automáticos rodam sem conta. */
@@ -965,6 +973,7 @@ function publishLobby(): void {
       members: room.roster.map((p) => p.name),
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
+      quiet: roomQuiet,
     };
   }
   const key = JSON.stringify(data);
@@ -1074,6 +1083,7 @@ function renderLobby(): void {
   $('lobby-card').hidden = !on || gated;
   $('home-col').hidden = gated;
   $('create-name-row').hidden = !on;
+  $('create-announce-row').hidden = !on;
   $('create-card').hidden = on;
 
   const u = lobbyState.user;

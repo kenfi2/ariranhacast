@@ -62,6 +62,8 @@ export interface PublishedRoom {
   members: string[];
   live: number;
   proto: number;
+  /** Não avisar no canal do Discord (webhook) quando a sala abrir. */
+  quiet?: boolean;
 }
 
 /**

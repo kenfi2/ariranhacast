@@ -593,6 +593,7 @@ function cleanPublished(raw: unknown): PublishedRoom | null {
     members: Array.isArray(r.members) ? r.members.slice(0, 20).map((m) => text(m, 24)).filter(Boolean) : [],
     live: int(r.live, 16),
     proto: int(r.proto, 1000),
+    quiet: r.quiet === true,
   };
 }
 
