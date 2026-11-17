@@ -8,6 +8,7 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Build;
 import android.view.Window;
 import android.view.WindowManager;
@@ -181,5 +182,45 @@ public class CallPlugin extends Plugin {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ---------- login (conta) ----------
+
+    /** Abre o login (https) no navegador do sistema. Nunca abre outro tipo de link. */
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        String url = call.getString("url", "");
+        if (url == null || !url.startsWith("https://")) {
+            call.reject("url inválida");
+            return;
+        }
+        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(i);
+        call.resolve();
+    }
+
+    /** Link ariranhacast:// que abriu o app (se o app estava fechado). Entregue uma vez só. */
+    @PluginMethod
+    public void takeLaunchLink(PluginCall call) {
+        JSObject r = new JSObject();
+        Intent intent = getActivity().getIntent();
+        String data = intent != null ? intent.getDataString() : null;
+        if (data != null && data.startsWith("ariranhacast://")) {
+            r.put("url", data);
+            intent.setData(null);
+        }
+        call.resolve(r);
+    }
+
+    /** O navegador devolveu o login (ariranhacast://auth?...) ou abriu um convite com o app aberto. */
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        String data = intent != null ? intent.getDataString() : null;
+        if (data == null || !data.startsWith("ariranhacast://")) return;
+        JSObject o = new JSObject();
+        o.put("url", data);
+        notifyListeners("appLink", o, true);
     }
 }

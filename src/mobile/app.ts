@@ -2,15 +2,17 @@
 // pensada para o celular. O celular fala, ouve, usa o chat e assiste às transmissões;
 // não transmite e não repassa vídeo para ninguém (é sempre uma "folha" da árvore).
 import { measurePc } from '../renderer/link';
-import { Room } from '../renderer/room';
+import { PROTO, Room } from '../renderer/room';
+import { LobbyClient, type LobbyRoom, type PublishedRoom, type Session } from '../shared/lobby';
 import { loadIce, net, normalizeCode } from '../renderer/signaling';
 import { playSfx, type Sfx } from '../renderer/sounds';
 import type { ChatMessage, Quality, RosterEntry, Settings } from '../renderer/types';
 import { GATE_MAX_DB, GATE_MIN_DB, loadVoicePrefs, Voice, type GateMode, type NsMode, type VoicePrefs } from '../renderer/voice';
 import { Watch } from '../renderer/watch';
-import { callStart, callStop, deviceStatus, keepScreenOn, native, onFullscreenExit, setFullscreen, setSpeaker } from './native';
+import { callStart, callStop, deviceStatus, keepScreenOn, native, onAppLink, onFullscreenExit, openBrowser, setFullscreen, setSpeaker } from './native';
 
 declare const __VERSION__: string;
+declare const __LOBBY_URL__: string;
 const VERSION = `${__VERSION__}-android`;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -103,9 +105,32 @@ const store = {
   },
 };
 
+const SESSION_KEY = 'ariranhacast.session';
+const lobby = new LobbyClient(__LOBBY_URL__, {
+  load(): Session | null {
+    try {
+      return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null');
+    } catch {
+      return null;
+    }
+  },
+  save(sess: Session | null): void {
+    if (sess) localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+    else localStorage.removeItem(SESSION_KEY);
+  },
+});
+const testingParams = new URLSearchParams(location.search).has('server'); // testes automáticos: sem conta
+const lobbyOn = (): boolean => lobby.enabled && !testingParams;
+const needsLogin = (): boolean => lobbyOn() && !lobby.state.user;
+/** Com conta: o nome vem dela, com "(celular)" para não confundir com a mesma pessoa no PC. */
+function myName(): string {
+  const u = lobby.state.user;
+  return u ? `${u.name.slice(0, 14)} (celular)` : store.name || `Convidado${Math.floor(Math.random() * 900 + 100)}`;
+}
+
 function settings(): Settings {
   return {
-    name: store.name || `Convidado${Math.floor(Math.random() * 900 + 100)}`,
+    name: myName(),
     server: new URLSearchParams(location.search).get('server') ?? '', // só para testes
     iceServers: store.ice,
     hotMic: '',
@@ -163,6 +188,180 @@ function sfx(kind: Sfx): void {
   if (voice) playSfx(kind, voice.prefs.sounds, '');
 }
 
+// ---------- conta e salas abertas (lobby) ----------
+// Com servidor de lobby configurado, entrar com uma conta é obrigatório. O login abre no navegador
+// do sistema e volta pelo link ariranhacast://auth?… (a sessão é deste aparelho).
+let roomTitle = '';
+let publishedKey = 'null';
+let pendingCode = '';
+
+const LOCK_ICON = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
+
+function avatar(user: { id: string; name: string; avatar: string | null }, cls: string): HTMLElement {
+  const box = el('span', cls);
+  const letter = () => {
+    box.replaceChildren();
+    box.textContent = (user.name.trim()[0] ?? '?').toUpperCase();
+    box.style.background = color(user.id);
+  };
+  if (user.avatar) {
+    const img = el('img');
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.onerror = letter;
+    img.src = user.avatar;
+    box.append(img);
+  } else letter();
+  return box;
+}
+
+function publishLobby(): void {
+  if (!lobbyOn()) return;
+  let data: PublishedRoom | null = null;
+  if (room?.isHost && room.code) {
+    data = {
+      code: room.code,
+      name: roomTitle,
+      locked: room.hasPassword,
+      count: Math.max(1, room.roster.length),
+      members: room.roster.map((p) => p.name),
+      live: room.roster.filter((p) => p.screen).length,
+      proto: PROTO,
+    };
+  }
+  const key = JSON.stringify(data);
+  if (key === publishedKey) return;
+  publishedKey = key;
+  lobby.publish(data);
+}
+
+function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
+  const li = el('li', 'lobby-room');
+  li.dataset.code = r.code;
+  const title = el('div', 'lr-title');
+  title.append(el('span', 'lr-name', r.name));
+  if (r.locked) title.insertAdjacentHTML('beforeend', svg(LOCK_ICON));
+  if (r.live) title.append(el('span', 'lr-live', 'AO VIVO'));
+  const sub = el('div', 'lr-sub');
+  sub.append(avatar(r.host, 'avatar small'), el('span', '', `${r.count} ${r.count === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`));
+  const actions = el('div', 'lr-actions');
+  const join = el('button', 'primary', 'Entrar');
+  join.type = 'button';
+  let pass: HTMLInputElement | null = null;
+  if (r.proto !== PROTO) {
+    join.disabled = true;
+    join.textContent = r.proto > PROTO ? 'Atualize o app' : 'Versão antiga';
+  } else {
+    if (r.locked) {
+      pass = el('input');
+      pass.type = 'password';
+      pass.maxLength = 64;
+      pass.placeholder = 'Senha';
+      actions.append(pass);
+    }
+    join.onclick = () => {
+      if (pass && !pass.value) {
+        pass.focus();
+        return toast('Essa sala tem senha.');
+      }
+      if (saveHome()) void enter(false, r.code, pass?.value ?? '', r.name);
+    };
+  }
+  actions.append(join);
+  li.append(title, sub, actions);
+  return li;
+}
+
+function renderLobby(): void {
+  const on = lobbyOn();
+  const gated = needsLogin();
+  $('login').hidden = !gated;
+  $('home-main').hidden = gated;
+  $('lobby').hidden = !on;
+  $('account').hidden = !on || !lobby.state.user;
+  $('name-label').hidden = on;
+  $('room-name-label').hidden = !on;
+  const u = lobby.state.user;
+  if (u) {
+    $('acc-name').textContent = u.name;
+    $('acc-avatar').replaceWith(Object.assign(avatar(u, 'avatar'), { id: 'acc-avatar' }));
+  }
+  if (gated) {
+    const box = $('login-providers');
+    const ids = lobby.state.providers.map((p) => p.id).join(',');
+    if (box.dataset.ids !== ids) {
+      box.dataset.ids = ids;
+      box.replaceChildren(
+        ...lobby.state.providers.map((p) => {
+          const b = el('button', `p-${p.id}`, `Entrar com ${p.label}`);
+          b.type = 'button';
+          b.onclick = () =>
+            void openBrowser(lobby.loginUrl(p.id)).then((ok) => {
+              if (ok) $('login-wait').hidden = false;
+              else toast('Não foi possível abrir o navegador.');
+            });
+          return b;
+        }),
+      );
+    }
+    $('login-offline').hidden = lobby.state.providers.length > 0;
+    return;
+  }
+  if (!on) return;
+  const st = lobby.state.status;
+  const n = lobby.state.rooms.length;
+  $('lobby-status').textContent = st === 'online' ? `· ${n}` : st === 'offline' ? '· sem conexão' : '· conectando…';
+  $('lobby-empty').hidden = st !== 'online' || n > 0;
+  // A lista é refeita a cada mudança: guarda a senha que estava sendo digitada.
+  const typed = new Map<string, string>();
+  for (const input of document.querySelectorAll<HTMLInputElement>('#lobby-list input')) {
+    const code = input.closest<HTMLElement>('li')?.dataset.code ?? '';
+    if (input.value) typed.set(code, input.value);
+  }
+  $('lobby-list').replaceChildren(...lobby.state.rooms.map(lobbyRoomItem));
+  for (const li of document.querySelectorAll<HTMLElement>('#lobby-list li')) {
+    const input = li.querySelector('input');
+    if (input) input.value = typed.get(li.dataset.code ?? '') ?? '';
+  }
+}
+
+let hadUser = false;
+lobby.onchange = (st) => {
+  if (st.status === 'online') publishedKey = 'null'; // reconectou: o cliente já republica o que hospedamos
+  renderLobby();
+  if (!hadUser && st.user) {
+    $('login-wait').hidden = true;
+    if (pendingCode && !room) {
+      const code = pendingCode;
+      pendingCode = '';
+      void enter(false, code);
+    }
+  }
+  hadUser = !!st.user;
+};
+lobby.onerror = (text) => toast(text, 5000);
+
+onAppLink((url) => {
+  if (/^ariranhacast:\/\/auth[/?]/i.test(url)) {
+    void lobby.completeLogin(url);
+    return;
+  }
+  const m = /^ariranhacast:\/\/(?:entrar|join)\/([A-Za-z0-9]{4,16})\/?$/i.exec(url);
+  if (!m) return;
+  const code = normalizeCode(m[1]);
+  if (room) return toast(room.code === code ? 'Você já está nessa sala.' : `Convite para a sala ${code}: saia da sala atual para entrar.`);
+  if (needsLogin()) {
+    pendingCode = code;
+    return toast('Entre com a sua conta para abrir o convite.');
+  }
+  void enter(false, code);
+});
+
+$('btn-logout').onclick = () => {
+  if (room) return toast('Saia da sala antes de sair da conta.');
+  void lobby.logout();
+};
+
 // ---------- início ----------
 function renderHome(): void {
   $<HTMLInputElement>('name').value = store.name;
@@ -183,6 +382,8 @@ function renderHome(): void {
 }
 
 function saveHome(): boolean {
+  store.ice = $<HTMLTextAreaElement>('ice').value.trim();
+  if (lobbyOn()) return !!lobby.state.user;
   const name = $<HTMLInputElement>('name').value.trim().slice(0, 24);
   if (!name) {
     toast('Digite seu nome.');
@@ -202,7 +403,7 @@ $<HTMLFormElement>('join-form').onsubmit = (e) => {
   void enter(false, code, $<HTMLInputElement>('pass').value);
 };
 $('btn-create').onclick = () => {
-  if (saveHome()) void enter(true);
+  if (saveHome()) void enter(true, undefined, '', $<HTMLInputElement>('room-name').value);
 };
 $('btn-cancel').onclick = () => {
   if (!attempt) return;
@@ -213,8 +414,9 @@ $('btn-cancel').onclick = () => {
 };
 
 // ---------- entrar / sair ----------
-async function enter(create: boolean, code?: string, password = ''): Promise<void> {
+async function enter(create: boolean, code?: string, password = '', title = ''): Promise<void> {
   if (room || attempt) return;
+  if (needsLogin()) return toast('Entre com a sua conta primeiro.');
   const my = { cancelled: false, room: null as Room | null };
   attempt = my;
   cfg = settings();
@@ -240,6 +442,7 @@ async function enter(create: boolean, code?: string, password = ''): Promise<voi
   attempt = null;
   if (my.cancelled) return r.leave();
   room = r;
+  roomTitle = title.trim() || lobby.state.rooms.find((x) => x.code === r.code)?.name || '';
   store.remember(r.code);
   voice = new Voice(r.peer, cfg.name, (id) => r.isMember(id));
   if (voice.prefs.mode === 'ai') await voice.setMode('standard'); // a supressão por IA pesa no celular
@@ -297,6 +500,8 @@ function leave(reason?: string): void {
   voice = null;
   room.leave();
   room = null;
+  roomTitle = '';
+  publishLobby();
   rosterIds = null;
   sentState = '';
   unread = 0;
@@ -618,6 +823,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function poll(): Promise<void> {
+  publishLobby();
   if (!room || !voice) return;
   // retoma a transmissão que caiu (rede que piscou, troca de Wi-Fi para 4G)
   if (!document.hidden && wantWatch && !watch && room.roster.find((p) => p.id === wantWatch)?.screen) startWatch(wantWatch);
@@ -831,3 +1037,5 @@ $('btn-report').onclick = async () => {
 renderHome();
 renderBar();
 show('home');
+renderLobby();
+void lobby.start();

@@ -1,3 +1,5 @@
+import type { LobbyState, PublishedRoom } from '../shared/lobby';
+
 export interface SourceInfo {
   id: string;
   name: string;
@@ -45,6 +47,13 @@ export interface AriranhaBridge {
   pendingDeepLink(): Promise<string>;
   logError(text: string): Promise<void>;
   openLogs(): Promise<boolean>;
+  /** Conta e lista de salas abertas (o WebSocket e a sessão ficam no processo principal). */
+  lobbyState(): Promise<LobbyState>;
+  lobbyLogin(provider: string): Promise<boolean>;
+  lobbyLogout(): Promise<void>;
+  lobbyPublish(room: PublishedRoom | null): Promise<void>;
+  onLobby(cb: (s: LobbyState) => void): void;
+  onLobbyError(cb: (text: string) => void): void;
 }
 
 export type GameCapState =

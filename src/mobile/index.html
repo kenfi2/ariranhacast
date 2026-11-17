@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src 'self' https: wss: http://127.0.0.1:* ws://127.0.0.1:*; worker-src 'self' blob:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data: https://cdn.discordapp.com https://*.googleusercontent.com; media-src 'self' blob: mediastream:; connect-src 'self' https: wss: http://127.0.0.1:* ws://127.0.0.1:*; worker-src 'self' blob:" />
   <title>AriranhaCast</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -16,12 +16,32 @@
       <p class="muted" id="version"></p>
       <button id="btn-gear-home" class="gear" title="Configurações"></button>
     </div>
-    <label>Seu nome<input id="name" maxlength="24" autocomplete="off" /></label>
+    <!-- login (obrigatório quando o app tem servidor de lobby) -->
+    <section id="login" hidden>
+      <p class="muted center">Entre com sua conta do Discord ou do Google. Seu nome e sua foto vêm da conta, e dá para ficar conectado no celular e no PC ao mesmo tempo.</p>
+      <div id="login-providers" class="providers"></div>
+      <p id="login-wait" class="muted center" hidden>Termine o login no navegador; o app volta sozinho.</p>
+      <p id="login-offline" class="muted center" hidden>Sem conexão com o servidor. Tentando de novo…</p>
+    </section>
+
+    <div id="home-main">
+    <div id="account" class="account" hidden>
+      <span id="acc-avatar" class="avatar"></span>
+      <span id="acc-name"></span>
+      <button id="btn-logout" type="button">Sair</button>
+    </div>
+    <section id="lobby" hidden>
+      <h3>Salas abertas <span id="lobby-status"></span></h3>
+      <ul id="lobby-list"></ul>
+      <p id="lobby-empty" class="muted center" hidden>Nenhuma sala aberta agora.</p>
+    </section>
+    <label id="name-label">Seu nome<input id="name" maxlength="24" autocomplete="off" /></label>
     <form id="join-form">
       <label>Código da sala<input id="code" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" /></label>
       <label id="pass-label" hidden>Senha da sala<input id="pass" type="password" maxlength="64" /></label>
       <button class="primary big" type="submit">Entrar</button>
     </form>
+    <label id="room-name-label" hidden>Nome da sala (opcional)<input id="room-name" maxlength="40" autocomplete="off" /></label>
     <button id="btn-create" class="big">Criar sala</button>
     <ul id="recent"></ul>
     <details>
@@ -29,6 +49,7 @@
       <label>Servidor TURN (opcional: JSON ou URL https://)<textarea id="ice" rows="3" spellcheck="false"></textarea></label>
       <p class="muted">Normalmente não precisa: quem cria a sala no PC já repassa o TURN dela para você.</p>
     </details>
+    </div>
   </main>
 
   <!-- conectando -->

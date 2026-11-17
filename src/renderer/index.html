@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https: wss: http: ws:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob: https://cdn.discordapp.com https://*.googleusercontent.com; media-src 'self' blob: mediastream:; connect-src https: wss: http: ws:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
     <title>AriranhaCast</title>
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -15,14 +15,43 @@
         <span id="upd-bar" class="bar" hidden><i></i></span>
         <button id="upd-btn" type="button" class="primary small" hidden></button>
       </div>
-      <button id="btn-settings" class="ghost">Configurações</button>
+      <div class="top-right">
+        <div id="account" class="account" hidden>
+          <span id="acc-avatar" class="acc-avatar"></span>
+          <span id="acc-name"></span>
+          <button id="btn-logout" type="button" class="ghost small" title="Sair da conta neste PC">Sair</button>
+        </div>
+        <button id="btn-settings" class="ghost">Configurações</button>
+      </div>
     </header>
 
     <!-- Início -->
     <main id="view-home" class="view">
+      <!-- Login (obrigatório quando o app tem servidor de lobby) -->
+      <section id="login-card" class="card login" hidden>
+        <img class="login-logo" src="icon.png" alt="" />
+        <h2>Entrar no AriranhaCast</h2>
+        <p>Use sua conta do Discord ou do Google. Seu nome e sua foto vêm da conta, e dá para ficar conectado no PC e no celular ao mesmo tempo.</p>
+        <div id="login-providers" class="providers"></div>
+        <div id="login-wait" class="muted" hidden>Termine o login no navegador que abriu. <button id="btn-login-again" type="button" class="ghost small">Abrir de novo</button></div>
+        <div id="login-offline" class="muted" hidden>Sem conexão com o servidor. Tentando de novo…</div>
+      </section>
+
+      <!-- Salas abertas -->
+      <section id="lobby-card" class="card lobby" hidden>
+        <div class="row between">
+          <h2>Salas abertas</h2>
+          <span id="lobby-status" class="muted"></span>
+        </div>
+        <ul id="lobby-list"></ul>
+        <div id="lobby-empty" class="lobby-empty" hidden>Nenhuma sala aberta agora.<br />Crie uma e ela aparece aqui para todo mundo.</div>
+      </section>
+
+      <div id="home-col" class="home-col">
       <section class="card">
         <h2>Criar sala</h2>
         <p>Abre uma sala de voz. Lá dentro, cada um decide se só fala, liga a câmera ou transmite a tela.</p>
+        <input id="create-name" maxlength="40" placeholder="Nome da sala (opcional)" autocomplete="off" hidden />
         <input id="create-pass" type="password" maxlength="64" placeholder="Senha (opcional)" autocomplete="off" />
         <button id="btn-create" class="primary">Criar sala</button>
       </section>
@@ -39,6 +68,7 @@
           <ul id="recent-list"></ul>
         </div>
       </section>
+      </div>
       <div id="home-status" class="connecting" role="status" hidden>
         <span class="spinner" aria-hidden="true"></span>
         <span id="home-status-text"></span>
@@ -188,6 +218,7 @@
         </div>
         <section data-pane="geral">
         <label>Seu nome <input id="set-name" maxlength="24" /></label>
+        <p id="set-name-note" class="muted" hidden>O nome vem da sua conta. Para mudar, troque o nome no Discord/Google e entre de novo.</p>
         <label>Servidor de sinalização próprio (opcional)
           <input id="set-server" placeholder="exemplo.com:9000 — vazio usa a nuvem pública do PeerJS" />
         </label>

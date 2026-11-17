@@ -97,4 +97,10 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   pendingDeepLink: () => ipcRenderer.invoke('lc:deeplink-pending'),
   logError: (text: string) => ipcRenderer.invoke('lc:log', text),
   openLogs: () => ipcRenderer.invoke('lc:open-logs'),
+  lobbyState: () => ipcRenderer.invoke('lc:lobby-state'),
+  lobbyLogin: (provider: string) => ipcRenderer.invoke('lc:lobby-login', provider),
+  lobbyLogout: () => ipcRenderer.invoke('lc:lobby-logout'),
+  lobbyPublish: (room: unknown) => ipcRenderer.invoke('lc:lobby-publish', room),
+  onLobby: (cb: (s: unknown) => void) => on('lc:lobby', cb),
+  onLobbyError: (cb: (text: string) => void) => on('lc:lobby-error', cb),
 });
