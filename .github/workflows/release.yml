@@ -153,7 +153,19 @@ jobs:
           echo "APK=AriranhaCast-Android-$v.apk" >> "$GITHUB_ENV"
           echo "TAG=v$v" >> "$GITHUB_ENV"
 
+      # O app Android confere este arquivo ao abrir e oferece a atualização (baixa, confere o SHA-256
+      # e abre o instalador). Só sai com a chave estável: com a de depuração o Android recusaria
+      # instalar por cima.
+      - name: Aviso de atualização (latest-android.json)
+        if: env.ANDROID_KEYSTORE_FILE != ''
+        run: |
+          v=$(node -p "require('./package.json').version")
+          sha=$(sha256sum "$APK" | cut -d' ' -f1)
+          printf '{"version":"%s","apk":"%s","sha256":"%s"}\n' "$v" "$APK" "$sha" > latest-android.json
+          cat latest-android.json
+          echo "EXTRA=latest-android.json" >> "$GITHUB_ENV"
+
       - name: Anexar à release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$APK"
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$APK" $EXTRA

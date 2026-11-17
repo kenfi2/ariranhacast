@@ -9,6 +9,7 @@ const out = join(root, 'mobile', 'www');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const lobbyUrl = typeof pkg.ariranhacast?.lobbyUrl === 'string' ? pkg.ariranhacast.lobbyUrl : '';
+const updateUrl = typeof pkg.ariranhacast?.updateUrl === 'string' ? pkg.ariranhacast.updateUrl : '';
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 await build({
@@ -20,7 +21,7 @@ await build({
   format: 'iife',
   target: 'chrome120',
   loader: { '.wasm': 'binary' },
-  define: { __VERSION__: JSON.stringify(version), __LOBBY_URL__: JSON.stringify(lobbyUrl) },
+  define: { __VERSION__: JSON.stringify(version), __LOBBY_URL__: JSON.stringify(lobbyUrl), __UPDATE_URL__: JSON.stringify(updateUrl) },
   // @capacitor/core vem do pacote do app Android
   nodePaths: [join(root, 'mobile', 'node_modules')],
   logLevel: 'info',

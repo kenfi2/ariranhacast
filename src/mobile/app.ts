@@ -9,10 +9,11 @@ import { playSfx, type Sfx } from '../renderer/sounds';
 import type { ChatMessage, Quality, RosterEntry, Settings } from '../renderer/types';
 import { GATE_MAX_DB, GATE_MIN_DB, loadVoicePrefs, Voice, type GateMode, type NsMode, type VoicePrefs } from '../renderer/voice';
 import { Watch } from '../renderer/watch';
-import { callStart, callStop, deviceStatus, keepScreenOn, native, onAppLink, onFullscreenExit, openBrowser, setFullscreen, setSpeaker } from './native';
+import { callStart, callStop, deviceStatus, fetchText, installUpdate, keepScreenOn, native, onAppLink, onFullscreenExit, openBrowser, setFullscreen, setSpeaker } from './native';
 
 declare const __VERSION__: string;
 declare const __LOBBY_URL__: string;
+declare const __UPDATE_URL__: string;
 const VERSION = `${__VERSION__}-android`;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -360,6 +361,57 @@ onAppLink((url) => {
 $('btn-logout').onclick = () => {
   if (room) return toast('Saia da sala antes de sair da conta.');
   void lobby.logout();
+};
+
+// ---------- atualização do app ----------
+// Cada release publica o APK e o latest-android.json ({version, apk, sha256}). O app confere ao
+// abrir; com versão nova, mostra "Atualizar": baixa, confere o SHA-256 e abre o instalador do Android.
+let lastUpdateCheck = 0;
+let updateInfo: { version: string; apk: string; sha256: string } | null = null;
+
+function newer(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0);
+  return false;
+}
+
+async function checkUpdate(): Promise<void> {
+  if (!native || !/^https:\/\//.test(__UPDATE_URL__)) return;
+  lastUpdateCheck = Date.now();
+  try {
+    const j = JSON.parse(await fetchText(`${__UPDATE_URL__}latest-android.json`));
+    const version = String(j?.version ?? '');
+    const apk = String(j?.apk ?? '');
+    const sha256 = String(j?.sha256 ?? '').toLowerCase();
+    if (!/^\d+\.\d+\.\d+$/.test(version) || !/^AriranhaCast-Android-[\d.]+\.apk$/.test(apk) || !/^[0-9a-f]{64}$/.test(sha256)) return;
+    if (!newer(version, __VERSION__)) return;
+    updateInfo = { version, apk, sha256 };
+    $('update-text').textContent = `Versão ${version} disponível.`;
+    $('update-bar').hidden = false;
+  } catch {
+    /* sem rede ou release sem o arquivo: tenta na próxima vez */
+  }
+}
+
+$('btn-update').onclick = async () => {
+  const info = updateInfo;
+  if (!info) return;
+  const btn = $<HTMLButtonElement>('btn-update');
+  btn.disabled = true;
+  $('update-text').textContent = 'Baixando…';
+  try {
+    await installUpdate(`${__UPDATE_URL__}${info.apk}`, info.sha256, (pct) => {
+      $('update-text').textContent = pct >= 0 ? `Baixando… ${pct}%` : 'Baixando…';
+    });
+    $('update-text').textContent = 'Confirme a instalação na tela do Android.';
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    $('update-text').textContent = `Versão ${info.version} disponível.`;
+    toast(/permita/i.test(msg) ? msg : `Não foi possível atualizar: ${msg}`, 7000);
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 // ---------- início ----------
@@ -1039,3 +1091,8 @@ renderBar();
 show('home');
 renderLobby();
 void lobby.start();
+void checkUpdate();
+// Ao voltar para o app (estava em segundo plano), confere de novo, no máximo a cada 6 h.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastUpdateCheck > 6 * 3600_000) void checkUpdate();
+});
