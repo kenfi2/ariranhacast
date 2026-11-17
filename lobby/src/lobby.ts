@@ -7,7 +7,7 @@ const SESSION_TTL_MS = 60 * 24 * 3600_000; // 60 dias sem precisar logar de novo
 const MAX_MESSAGE = 4096;
 const CODE_RE = /^[A-Z0-9]{4,16}$/;
 /** Quanto tempo uma sala pode sumir da lista (troca de quem hospeda, rede piscando) antes do aviso "encerrada". */
-const CLOSE_GRACE_MS = 60_000;
+const CLOSE_GRACE_MS = 30_000;
 
 /** Texto seguro para mensagem do Discord: sem markdown, menções ou links. */
 function discordText(s: string): string {
@@ -264,7 +264,8 @@ export class Lobby extends DurableObject<Env> {
       const res = await fetch(`${hook}${path}`, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.slice(0, 1900), allowed_mentions: { parse: [] }, flags: 4 /* sem prévia do link */ }),
+        // Ao criar: flags 4 = sem prévia do link. Ao editar, só o texto (a edição não aceita trocar flags).
+        body: JSON.stringify(method === "POST" ? { content: content.slice(0, 1900), allowed_mentions: { parse: [] }, flags: 4 } : { content: content.slice(0, 1900), allowed_mentions: { parse: [] } }),
       });
       if (!res.ok) {
         console.log("webhook do Discord falhou", res.status, await res.text().catch(() => ""));
@@ -305,7 +306,10 @@ export class Lobby extends DurableObject<Env> {
         pending = true;
       }
     }
-    if (pending) void this.ctx.storage.setAlarm(now + CLOSE_GRACE_MS + 1000);
+    if (pending) {
+      console.log("salas anunciadas sumiram da lista; confirmação agendada");
+      void this.ctx.storage.setAlarm(now + CLOSE_GRACE_MS + 1000);
+    }
   }
 
   /** Passado o prazo, edita o aviso para "encerrada". */
@@ -319,6 +323,7 @@ export class Lobby extends DurableObject<Env> {
       if (open.has(row.code)) {
         this.ctx.storage.sql.exec("UPDATE announced SET gone_since = NULL WHERE code = ?", row.code);
       } else if (row.gone_since! <= limit) {
+        console.log("sala encerrada", row.code, row.message_id ? "editando o aviso" : "sem id do aviso");
         this.ctx.storage.sql.exec("DELETE FROM announced WHERE code = ?", row.code);
         if (row.message_id) await this.send("PATCH", `/messages/${row.message_id}`, `⚫ ~~Sala **${discordText(row.name)}** de **${discordText(row.host)}**~~ encerrada`);
       } else pending = true;

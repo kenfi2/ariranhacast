@@ -8,7 +8,7 @@
   </head>
   <body>
     <header id="topbar">
-      <div class="brand"><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
+      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
       <div id="upd" class="upd" hidden>
         <span id="upd-spin" class="spinner" hidden aria-hidden="true"></span>
         <span id="upd-text" role="status"></span>
@@ -34,6 +34,9 @@
 
     <!-- Início -->
     <main id="view-home" class="view">
+      <!-- Seus servidores do Discord (como no Discord): filtra as salas por servidor -->
+      <nav id="guild-rail" class="guild-rail" aria-label="Seus servidores do Discord" hidden></nav>
+      <div id="home-main" class="home-main">
       <!-- Login (obrigatório quando o app tem servidor de lobby) -->
       <section id="login-card" class="card login" hidden>
         <img class="login-logo" src="icon.png" alt="" />
@@ -47,9 +50,8 @@
       <!-- Salas abertas -->
       <section id="lobby-card" class="card lobby" hidden>
         <div class="row between">
-          <h2>Salas abertas</h2>
+          <h2>Salas abertas<span id="lobby-scope" class="lobby-scope"></span></h2>
           <div class="lobby-head-right">
-            <select id="lobby-filter" class="lobby-filter" title="Mostrar só as salas de quem está num servidor do Discord seu" hidden></select>
             <span id="lobby-status" class="muted"></span>
           </div>
         </div>
@@ -84,6 +86,7 @@
         <span id="home-status-text"></span>
         <button id="btn-cancel" type="button" class="ghost">Cancelar</button>
       </div>
+      </div>
     </main>
 
     <!-- Sala -->
@@ -109,7 +112,6 @@
             <button id="btn-leave" class="round hangup" title="Sair da sala"></button>
           </div>
           <div class="ctl-right">
-            <button id="btn-rooms" class="ghost small" title="Ver as salas abertas sem sair desta">Salas</button>
             <button id="btn-panel" class="ghost small">Painel</button>
           </div>
         </div>
