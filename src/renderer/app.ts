@@ -1288,6 +1288,8 @@ function renderTiles(): void {
     const ut = tiles.get(ukey) ?? makeTile(ukey, 'user');
     const camStream = p.id === me ? cams?.local : p.cam ? cams?.remote.get(p.id) : undefined;
     setVideo(ut, camStream, true);
+    // A sua webcam aparece espelhada para você (como no Discord/espelho); os outros recebem normal.
+    ut.video.classList.toggle('mirror', p.id === me);
     const userMode = `avatar:${room.isHost && p.id !== me}`;
     if (ut.mode !== userMode) {
       ut.mode = userMode;

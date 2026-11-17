@@ -1,7 +1,7 @@
 {
   "name": "ariranhacast",
   "productName": "AriranhaCast",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Sala de voz P2P com transmissão de tela e webcam (WebRTC)",
   "main": "dist/main.js",
   "scripts": {
