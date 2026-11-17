@@ -1134,6 +1134,7 @@ app.whenReady().then(() => {
   });
   handle('lc:lobby-logout', () => lobby.logout());
   handle('lc:lobby-publish', (room: unknown) => lobby.publish(room === null ? null : cleanPublished(room)));
+  handle('lc:lobby-presence', (code: unknown) => lobby.setPresence(typeof code === 'string' && CODE_RE.test(code) ? code.toUpperCase() : null, 'pc'));
   handle('lc:deeplink-pending', () => {
     const c = deepLink;
     deepLink = '';

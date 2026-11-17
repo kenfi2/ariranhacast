@@ -597,6 +597,7 @@ function leaveRoom(reason?: string): void {
   room = null;
   roomTitle = '';
   publishLobby(); // tira a sala da lista (se éramos nós que hospedávamos)
+  syncPresence();
   voice = null;
   cams = null;
   focusKey = '';
@@ -838,7 +839,9 @@ renderRecent();
 // O processo principal mantém a sessão e o WebSocket com o servidor do lobby; aqui só a tela.
 // Com servidor de lobby configurado, entrar com uma conta (Discord, Google…) é obrigatório:
 // o nome e a foto vêm da conta, e a mesma conta pode estar no PC e no celular ao mesmo tempo.
-let lobbyState: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [], guilds: [] };
+let lobbyState: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [], guilds: [], online: [] };
+let personFilter = ''; // id de alguém do "Online agora": mostra só a sala em que a pessoa está
+let sentPresence: string | null | undefined;
 let lobbyFilter = ''; // id de um servidor do Discord, ou '' = todas as salas
 let pendingInvite = '';
 let lastProvider = '';
@@ -1004,9 +1007,13 @@ function renderLobby(): void {
   if (!on) return;
 
   renderGuildRail();
+  renderOnline();
   // Primeiro as salas de quem está num servidor seu; dentro disso, a ordem do servidor (mais gente primeiro).
+  const person = lobbyState.online.find((o) => o.id === personFilter);
+  if (personFilter && !person?.room) personFilter = '';
+  if (person?.room) $('lobby-scope').textContent = ` · com ${person.name}`;
   const rooms = lobbyState.rooms
-    .filter((r) => !lobbyFilter || r.guilds.includes(lobbyFilter))
+    .filter((r) => (person?.room ? r.code === person.room : !lobbyFilter || r.guilds.includes(lobbyFilter)))
     .map((r, i) => ({ r, i }))
     .sort((a, b) => Number(b.r.guilds.length > 0) - Number(a.r.guilds.length > 0) || a.i - b.i)
     .map((x) => x.r);
@@ -1041,6 +1048,48 @@ function startLogin(provider: string): void {
     $('login-wait').hidden = false;
   });
 }
+/** Onde estamos (sala ou nenhuma): aparece no "Online agora" de quem tem servidor em comum. */
+function syncPresence(): void {
+  if (!lobbyOn()) return;
+  const code = room?.code ?? null;
+  if (code === sentPresence) return;
+  sentPresence = code;
+  void window.ariranhacast.lobbyPresence(code);
+}
+
+/** "Online agora": quem está logado e tem servidor do Discord em comum. Clicar mostra a sala da pessoa. */
+function renderOnline(): void {
+  const list = lobbyState.online;
+  const show = lobbyState.guilds.length > 0;
+  $('online-card').hidden = !show;
+  if (!show) return;
+  $('online-count').textContent = list.length ? String(list.length) : '';
+  $('online-empty').hidden = list.length > 0;
+  $('online-list').replaceChildren(
+    ...list.map((o) => {
+      const li = el('li', 'online-item');
+      li.classList.toggle('on', personFilter === o.id);
+      li.classList.toggle('in-room', !!o.room);
+      const av = el('span', 'online-av');
+      av.append(avatar(o, 'lr-avatar'), el('i', 'online-dot'));
+      const text = el('div', 'online-text');
+      const r = o.room ? lobbyState.rooms.find((x) => x.code === o.room) : undefined;
+      const where = o.room ? (room?.code === o.room ? 'na sua sala' : r ? `na sala ${r.name}` : 'numa sala') : 'na tela inicial';
+      const dev = o.devices.includes('android') ? (o.devices.includes('pc') ? ' · PC e celular' : ' · celular') : '';
+      text.append(el('span', 'online-name', o.name), el('span', 'online-where', where + dev));
+      li.append(av, text);
+      li.title = o.room ? 'Clique para ver a sala dessa pessoa' : `${o.name} está na tela inicial`;
+      li.onclick = () => {
+        if (!o.room) return;
+        personFilter = personFilter === o.id ? '' : o.id;
+        if (personFilter) lobbyFilter = '';
+        renderLobby();
+      };
+      return li;
+    }),
+  );
+}
+
 /**
  * Barra de servidores à esquerda (como no Discord): "Todas" e os seus servidores, primeiro os que
  * têm salas abertas (com a quantidade). Clicar filtra a lista; clicar de novo volta para todas.
@@ -1066,6 +1115,7 @@ function renderGuildRail(): void {
     if (n) b.append(el('span', 'rail-badge', String(n)));
     b.onclick = () => {
       lobbyFilter = lobbyFilter === id ? '' : id;
+      personFilter = '';
       renderLobby();
     };
     return b;
@@ -1117,6 +1167,7 @@ function onLobby(s: LobbyState): void {
     localStorage.setItem('ariranhacast.settings', JSON.stringify(settings));
   }
   if (s.status === 'online') publishedKey = 'null'; // reconectou: o principal já republica o que hospedamos
+  syncPresence();
   renderLobby();
   if (!hadUser && s.user) {
     $('login-wait').hidden = true;
@@ -2000,6 +2051,7 @@ $('btn-report').onclick = async () => {
 async function poll(): Promise<void> {
   pollCount++;
   publishLobby();
+  syncPresence();
   // Retoma transmissões que o usuário estava assistindo e caíram (rede que piscou, troca de quem hospeda).
   if (room) {
     for (const [id, last] of wantWatch) {

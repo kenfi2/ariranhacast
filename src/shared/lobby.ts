@@ -28,6 +28,16 @@ export interface LobbyRoom {
   guilds: string[];
 }
 
+/** Alguém online agora que tem servidor do Discord em comum com você. */
+export interface LobbyOnline {
+  id: string;
+  name: string;
+  avatar: string | null;
+  room: string | null; // sala em que está (código) ou null
+  devices: string[]; // "pc", "android"
+  guilds: string[];
+}
+
 /** Um servidor do Discord da sua conta. */
 export interface LobbyGuild {
   id: string;
@@ -65,6 +75,8 @@ export interface LobbyState {
   providers: LobbyProvider[];
   /** Seus servidores do Discord (vazio para contas Google ou antes de logar de novo). */
   guilds: LobbyGuild[];
+  /** Online agora, com servidor do Discord em comum. */
+  online: LobbyOnline[];
 }
 
 export interface Session {
@@ -120,6 +132,21 @@ function cleanRoom(raw: unknown): LobbyRoom | null {
   };
 }
 
+function cleanOnline(raw: unknown): LobbyOnline | null {
+  const o = raw as Record<string, unknown> | null;
+  const user = cleanUser({ ...o, provider: 'discord' });
+  if (!user) return null;
+  const room = str(o?.room, 16);
+  return {
+    id: user.id,
+    name: user.name,
+    avatar: user.avatar,
+    room: CODE_RE.test(room) ? room : null,
+    devices: Array.isArray(o?.devices) ? (o.devices as unknown[]).filter((d): d is string => d === 'pc' || d === 'android') : [],
+    guilds: Array.isArray(o?.guilds) ? (o.guilds as unknown[]).slice(0, 10).filter((g): g is string => typeof g === 'string' && /^\d{5,25}$/.test(g)) : [],
+  };
+}
+
 function cleanGuild(raw: unknown): LobbyGuild | null {
   const g = raw as Record<string, unknown> | null;
   const id = str(g?.id, 25);
@@ -139,7 +166,7 @@ function randomState(): string {
 }
 
 export class LobbyClient {
-  state: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [], guilds: [] };
+  state: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [], guilds: [], online: [] };
   onchange: (s: LobbyState) => void = () => {};
   onerror: (text: string) => void = () => {};
 
@@ -152,6 +179,8 @@ export class LobbyClient {
   private pendingState: { value: string; until: number } | null = null;
   private hosting: PublishedRoom | null = null;
   private lastSent = '';
+  private presence: { room: string | null; device: 'pc' | 'android' } = { room: null, device: 'pc' };
+  private lastPresence = '';
 
   constructor(
     private baseUrl: string,
@@ -178,7 +207,7 @@ export class LobbyClient {
     } catch {
       this.session = null;
     }
-    if (!this.session) return this.set({ status: 'logged-out', user: null, rooms: [], guilds: [] });
+    if (!this.session) return this.set({ status: 'logged-out', user: null, rooms: [], guilds: [], online: [] });
     this.set({ user: this.session.user });
     await this.connect();
   }
@@ -229,10 +258,18 @@ export class LobbyClient {
     this.hosting = null;
     this.cleanup();
     await this.store.save(null);
-    this.set({ status: 'logged-out', user: null, rooms: [], guilds: [] });
+    this.set({ status: 'logged-out', user: null, rooms: [], guilds: [], online: [] });
     if (token) {
       await fetch(`${this.baseUrl}/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
     }
+  }
+
+  /** Em que sala esta pessoa está agora (null = nenhuma). Aparece em "Online agora" para quem tem servidor em comum. */
+  setPresence(room: string | null, device: 'pc' | 'android'): void {
+    this.presence = { room: room && CODE_RE.test(room) ? room : null, device };
+    const msg = JSON.stringify({ type: 'presence', ...this.presence });
+    if (msg === this.lastPresence) return;
+    if (this.send(msg)) this.lastPresence = msg;
   }
 
   /** Quem hospeda publica a sala (null = tira da lista). Reenviada sozinha após reconectar. */
@@ -285,7 +322,7 @@ export class LobbyClient {
         this.session = null;
         await this.store.save(null);
         this.onerror('Sua sessão expirou. Entre de novo.');
-        return this.set({ status: 'logged-out', user: null, rooms: [], guilds: [] });
+        return this.set({ status: 'logged-out', user: null, rooms: [], guilds: [], online: [] });
       }
       if (me && JSON.stringify(me) !== JSON.stringify(session.user)) {
         session.user = me;
@@ -303,6 +340,8 @@ export class LobbyClient {
       this.lastSent = '';
       this.set({ status: 'online' });
       this.pingTimer = setInterval(() => ws.readyState === ws.OPEN && ws.send('ping'), 25_000);
+      this.lastPresence = '';
+      this.setPresence(this.presence.room, this.presence.device);
       if (this.hosting) this.publish(this.hosting);
     };
     ws.onmessage = (e) => {
@@ -315,10 +354,11 @@ export class LobbyClient {
       }
       if (msg?.type === 'welcome' || msg?.type === 'rooms') {
         const rooms = Array.isArray(msg.rooms) ? (msg.rooms as unknown[]).slice(0, 200).map(cleanRoom).filter((r): r is LobbyRoom => !!r) : [];
+        const online = Array.isArray(msg.online) ? (msg.online as unknown[]).slice(0, 100).map(cleanOnline).filter((o): o is LobbyOnline => !!o) : [];
         if (msg.type === 'welcome' && Array.isArray(msg.guilds)) {
           const guilds = (msg.guilds as unknown[]).slice(0, 250).map(cleanGuild).filter((g): g is LobbyGuild => !!g);
-          this.set({ rooms, guilds });
-        } else this.set({ rooms });
+          this.set({ rooms, online, guilds });
+        } else this.set({ rooms, online });
       }
     };
     ws.onclose = () => {
@@ -339,7 +379,7 @@ export class LobbyClient {
   }
 
   private scheduleReconnect(): void {
-    this.set({ status: 'offline', rooms: [] });
+    this.set({ status: 'offline', rooms: [], online: [] });
     const delay = Math.min(30_000, 1000 * 2 ** this.retries++) + Math.random() * 500;
     this.retryTimer = setTimeout(() => void this.connect(), delay);
   }
@@ -351,6 +391,7 @@ export class LobbyClient {
     const ws = this.ws;
     this.ws = null;
     this.lastSent = '';
+    this.lastPresence = '';
     if (ws && (ws.readyState === ws.CONNECTING || ws.readyState === ws.OPEN)) {
       try {
         ws.close(1000);
