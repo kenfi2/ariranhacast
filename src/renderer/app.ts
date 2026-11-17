@@ -1101,7 +1101,10 @@ function renderGuildRail(): void {
   if (lobbyFilter && !guilds.some((g) => g.id === lobbyFilter)) lobbyFilter = '';
   rail.hidden = !guilds.length;
   document.body.classList.toggle('has-rail', guilds.length > 0);
-  const count = (id: string) => lobbyState.rooms.filter((r) => r.guilds.includes(id)).length;
+  // Conta só as salas dos outros: a sua própria sala (que você hospeda ou em que está) não acende servidor nenhum.
+  const me = lobbyState.user?.id;
+  const others = lobbyState.rooms.filter((r) => r.host.id !== me && r.code !== room?.code);
+  const count = (id: string) => others.filter((r) => r.guilds.includes(id)).length;
   const sorted = guilds
     .map((g, i) => ({ g, i, n: count(g.id) }))
     .sort((a, b) => b.n - a.n || a.i - b.i);
