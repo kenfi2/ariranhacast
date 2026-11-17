@@ -372,6 +372,12 @@ let lastNet: NetInfo | null = null;
 function show(view: 'home' | 'room'): void {
   $('view-home').hidden = view !== 'home';
   $('view-room').hidden = view !== 'room';
+  // Na tela inicial com uma chamada aberta: a faixa para voltar e a lista marcando a sala atual.
+  $('back-bar').hidden = view !== 'home' || !room;
+  if (view === 'home' && room) {
+    $('back-name').textContent = roomTitle || room.code;
+    renderLobby();
+  }
 }
 
 let toastTimer = 0;
@@ -469,8 +475,16 @@ $('btn-cancel').onclick = () => {
 };
 
 async function enterRoom(create: boolean, code?: string, password = '', title = ''): Promise<void> {
-  if (room || busy) return;
+  if (busy) return;
   if (needsLogin()) return toast('Entre com a sua conta primeiro.');
+  if (room) {
+    // Já numa chamada: só troca de sala se a pessoa confirmar.
+    if (!create && code === room.code) return show('room');
+    const here = roomTitle || room.code;
+    const next = create ? 'criar uma sala nova' : `entrar em ${title || code}`;
+    if (!window.confirm(`Você está na sala ${here}. Sair dela para ${next}?`)) return;
+    leaveRoom();
+  }
   busy = true;
   const my: Attempt = { create, room: null, cancelled: false };
   attempt = my;
@@ -683,6 +697,8 @@ $('btn-copy').onclick = async () => {
 $('room-code').title = 'Clique para copiar o código';
 $('room-code').onclick = () => $('btn-copy').click();
 $('btn-panel').onclick = () => ($('room-side').hidden = !$('room-side').hidden);
+$('btn-rooms').onclick = () => show('home');
+$('btn-back').onclick = () => show('room');
 
 // ---------- barra de controles ----------
 /** Só troca o conteúdo se mudou: esta barra é atualizada a cada mudança de quem está falando. */
@@ -897,7 +913,12 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   const join = el('button', 'primary small', 'Entrar');
   join.type = 'button';
   let pass: HTMLInputElement | null = null;
-  if (r.proto !== PROTO) {
+  if (room?.code === r.code) {
+    li.classList.add('mine');
+    join.textContent = 'Voltar';
+    join.title = 'Você está nesta sala';
+    join.onclick = () => show('room');
+  } else if (r.proto !== PROTO) {
     join.disabled = true;
     join.textContent = 'Outra versão';
     join.title = r.proto > PROTO ? 'Essa sala usa uma versão mais nova do app. Atualize o AriranhaCast.' : 'Quem hospeda usa uma versão mais antiga do app.';
@@ -964,6 +985,7 @@ function renderLobby(): void {
   const n = lobbyState.rooms.length;
   $('lobby-status').textContent = st === 'online' ? (n === 1 ? '1 sala' : `${n} salas`) : st === 'offline' ? 'sem conexão, tentando de novo…' : 'conectando…';
   $('lobby-empty').hidden = st !== 'online' || n > 0;
+  $('lobby-list').hidden = n === 0;
   // A lista é refeita a cada mudança: guarda a senha que a pessoa estava digitando (e o foco).
   const typed = new Map<string, string>();
   let focused = '';
@@ -1030,7 +1052,7 @@ function openInvite(code: string): void {
     pendingInvite = code;
     return toast('Entre com a sua conta para abrir o convite.');
   }
-  if (room) return toast(room.code === code ? 'Você já está nessa sala.' : `Convite para a sala ${code}: saia da sala atual para entrar.`);
+  if (room?.code === code) return show('room');
   $<HTMLInputElement>('join-code').value = code;
   void enterRoom(false, code, $<HTMLInputElement>('join-pass').value);
 }
