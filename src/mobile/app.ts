@@ -2,7 +2,7 @@
 // pensada para o celular. O celular fala, ouve, usa o chat e assiste às transmissões;
 // não transmite e não repassa vídeo para ninguém (é sempre uma "folha" da árvore).
 import { measurePc } from '../renderer/link';
-import { PROTO, Room } from '../renderer/room';
+import { clampLimit, DEFAULT_LIMIT, PROTO, Room } from '../renderer/room';
 import { LobbyClient, type LobbyRoom, type PublishedRoom, type Session } from '../shared/lobby';
 import { loadIce, net, normalizeCode } from '../renderer/signaling';
 import { playSfx, type Sfx } from '../renderer/sounds';
@@ -226,6 +226,7 @@ function publishLobby(): void {
       name: roomTitle,
       locked: room.hasPassword,
       count: Math.max(1, room.roster.length),
+      max: room.limit,
       members: room.roster.map((p) => p.name),
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
@@ -245,7 +246,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   if (r.locked) title.insertAdjacentHTML('beforeend', svg(LOCK_ICON));
   if (r.live) title.append(el('span', 'lr-live', 'AO VIVO'));
   const sub = el('div', 'lr-sub');
-  sub.append(avatar(r.host, 'avatar small'), el('span', '', `${r.count} ${r.count === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`));
+  sub.append(avatar(r.host, 'avatar small'), el('span', '', `${r.count}/${r.max} pessoas · ${r.members.join(', ') || r.host.name}`));
   // Servidor do Discord em comum com quem hospeda.
   const shared = r.guilds.map((id) => lobby.state.guilds.find((g) => g.id === id)).filter((g): g is NonNullable<typeof g> => !!g);
   let chips: HTMLElement | null = null;
@@ -268,7 +269,10 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   const join = el('button', 'primary', 'Entrar');
   join.type = 'button';
   let pass: HTMLInputElement | null = null;
-  if (r.proto !== PROTO) {
+  if (r.count >= r.max) {
+    join.disabled = true;
+    join.textContent = 'Cheia';
+  } else if (r.proto !== PROTO) {
     join.disabled = true;
     join.textContent = r.proto > PROTO ? 'Atualize o app' : 'Versão antiga';
   } else {
@@ -502,7 +506,13 @@ async function enter(create: boolean, code?: string, password = '', title = ''):
   const ice = await loadIce(cfg);
   if (my.cancelled) return;
   if (!ice.ok) toast(`TURN das configurações inválido (${ice.error}); seguindo sem ele.`);
-  const r = new Room(cfg, VERSION, password);
+  let limit = DEFAULT_LIMIT;
+  if (create) {
+    limit = clampLimit(Math.round(Number($<HTMLInputElement>('room-limit').value)));
+    localStorage.setItem('ariranhacast.limit', String(limit));
+    $<HTMLInputElement>('room-limit').value = String(limit);
+  }
+  const r = new Room(cfg, VERSION, password, limit);
   my.room = r;
   try {
     if (create) await r.create();
@@ -1114,6 +1124,7 @@ $('btn-report').onclick = async () => {
 renderHome();
 renderBar();
 show('home');
+$<HTMLInputElement>('room-limit').value = String(clampLimit(Number(localStorage.getItem('ariranhacast.limit') ?? DEFAULT_LIMIT)));
 renderLobby();
 void lobby.start();
 void checkUpdate();

@@ -40,6 +40,7 @@ export type Room = {
   locked: boolean; // tem senha
   host: User;
   count: number; // pessoas na sala
+  max: number; // limite de pessoas escolhido por quem criou a sala
   members: string[]; // nomes
   live: number; // quantas transmissões ao vivo
   proto: number; // versão do protocolo da sala (app incompatível vê aviso)

@@ -1,7 +1,7 @@
 import { Broadcast } from './broadcast';
 import { Cams } from './cams';
 import { availableCodecs } from './codecs';
-import { PROTO, Room } from './room';
+import { clampLimit, DEFAULT_LIMIT, PROTO, Room } from './room';
 import { mountChat } from './chatui';
 import { ClipBuffer } from './clips';
 import { measurePc, type Route } from './link';
@@ -475,6 +475,12 @@ $('btn-cancel').onclick = () => {
   toast('Conexão cancelada.');
 };
 
+/** Limite de pessoas escolhido na última sala criada (cada um ajusta para a própria banda e PC). */
+function savedLimit(): number {
+  return clampLimit(Number(localStorage.getItem('ariranhacast.limit') ?? DEFAULT_LIMIT));
+}
+$<HTMLInputElement>('create-limit').value = String(savedLimit());
+
 async function enterRoom(create: boolean, code?: string, password = '', title = ''): Promise<void> {
   if (busy) return;
   if (needsLogin()) return toast('Entre com a sua conta primeiro.');
@@ -493,7 +499,13 @@ async function enterRoom(create: boolean, code?: string, password = '', title = 
   const ice = await loadIce(settings);
   if (my.cancelled) return;
   if (!ice.ok) toast(`Não foi possível carregar o servidor TURN das Configurações (${ice.error}). Seguindo sem ele.`);
-  const r = new Room(settings, appVersion || '0', password);
+  let limit = DEFAULT_LIMIT;
+  if (create) {
+    limit = clampLimit(Math.round(Number($<HTMLInputElement>('create-limit').value)));
+    $<HTMLInputElement>('create-limit').value = String(limit);
+    localStorage.setItem('ariranhacast.limit', String(limit));
+  }
+  const r = new Room(settings, appVersion || '0', password, limit);
   my.room = r;
   try {
     if (create) await r.create(code);
@@ -884,6 +896,7 @@ function publishLobby(): void {
       name: roomTitle,
       locked: room.hasPassword,
       count: Math.max(1, room.roster.length),
+      max: room.limit,
       members: room.roster.map((p) => p.name),
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
@@ -909,7 +922,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
     title.append(live);
   }
   const sub = el('div', 'lr-sub');
-  const who = el('span', 'lr-who', `${r.count} ${r.count === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`);
+  const who = el('span', 'lr-who', `${r.count}/${r.max} ${r.max === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`);
   who.title = r.members.join('\n');
   sub.append(avatar(r.host, 'lr-avatar'), who);
   main.append(title, sub);
@@ -943,6 +956,10 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
     join.textContent = 'Voltar';
     join.title = 'Você está nesta sala';
     join.onclick = () => show('room');
+  } else if (r.count >= r.max) {
+    join.disabled = true;
+    join.textContent = 'Cheia';
+    join.title = `A sala chegou ao limite de ${r.max} pessoas escolhido por quem a criou.`;
   } else if (r.proto !== PROTO) {
     join.disabled = true;
     join.textContent = 'Outra versão';
@@ -1101,7 +1118,10 @@ function renderGuildRail(): void {
   if (lobbyFilter && !guilds.some((g) => g.id === lobbyFilter)) lobbyFilter = '';
   rail.hidden = !guilds.length;
   document.body.classList.toggle('has-rail', guilds.length > 0);
-  const count = (id: string) => lobbyState.rooms.filter((r) => r.guilds.includes(id)).length;
+  // Conta só as salas dos outros: a sua própria sala (que você hospeda ou em que está) não acende servidor nenhum.
+  const me = lobbyState.user?.id;
+  const others = lobbyState.rooms.filter((r) => r.host.id !== me && r.code !== room?.code);
+  const count = (id: string) => others.filter((r) => r.guilds.includes(id)).length;
   const sorted = guilds
     .map((g, i) => ({ g, i, n: count(g.id) }))
     .sort((a, b) => b.n - a.n || a.i - b.i);

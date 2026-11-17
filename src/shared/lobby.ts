@@ -20,6 +20,8 @@ export interface LobbyRoom {
   locked: boolean;
   host: LobbyUser;
   count: number;
+  /** Limite de pessoas da sala. */
+  max: number;
   members: string[];
   live: number;
   proto: number;
@@ -56,6 +58,7 @@ export interface PublishedRoom {
   name: string;
   locked: boolean;
   count: number;
+  max: number;
   members: string[];
   live: number;
   proto: number;
@@ -123,8 +126,9 @@ function cleanRoom(raw: unknown): LobbyRoom | null {
     name: str(r?.name, 40) || `Sala de ${host.name}`,
     locked: r?.locked === true,
     host,
-    count: int(r?.count, 1, 16),
-    members: Array.isArray(r?.members) ? (r.members as unknown[]).slice(0, 16).map((m) => str(m, 24)).filter(Boolean) : [],
+    count: int(r?.count, 1, 50),
+    max: r?.max === undefined ? 16 : int(r?.max, 2, 50),
+    members: Array.isArray(r?.members) ? (r.members as unknown[]).slice(0, 20).map((m) => str(m, 24)).filter(Boolean) : [],
     live: int(r?.live, 0, 16),
     proto: int(r?.proto, 0, 1000),
     createdAt: Number.isFinite(r?.createdAt) ? Number(r!.createdAt) : 0,

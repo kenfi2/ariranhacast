@@ -6,7 +6,11 @@ import type { ChatImage, ChatMessage, Emote, Msg, RosterEntry, Settings } from '
 
 /** Versão do protocolo entre os apps. Muda quando versões diferentes deixam de se entender. */
 export const PROTO = 4;
-const MAX_MEMBERS = 16;
+/** Limite de pessoas: quem cria a sala escolhe (padrão 16). Acima disso a malha P2P pesa demais. */
+export const DEFAULT_LIMIT = 16;
+export const MAX_LIMIT = 50;
+const MAX_MEMBERS = MAX_LIMIT;
+export const clampLimit = (n: unknown): number => (Number.isInteger(n) ? Math.min(MAX_LIMIT, Math.max(2, n as number)) : DEFAULT_LIMIT);
 const DEAD_AFTER_MS = 5000;
 const RECOVER_FOR_MS = 120_000;
 const HELLO_TIMEOUT_MS = 10_000;
@@ -76,6 +80,8 @@ export class Room {
   code = '';
   isHost = false;
   roster: RosterEntry[] = [];
+  /** Máximo de pessoas na sala (inclui quem hospeda). Repassado a todos, para valer também se outro assumir. */
+  limit = DEFAULT_LIMIT;
   private roomPeer?: Peer; // só em quem hospeda
   private self: RosterEntry;
   private members = new Map<string, Member>(); // só em quem hospeda
@@ -110,7 +116,9 @@ export class Room {
     private settings: Settings,
     private version: string,
     private password = '',
+    limit: number = DEFAULT_LIMIT,
   ) {
+    this.limit = clampLimit(limit);
     this.self = { id: '', name: settings.name.slice(0, 24) || 'Convidado', cam: false, screen: false, title: '', muted: true, deaf: false };
   }
 
@@ -255,7 +263,7 @@ export class Room {
         };
         if (msg.proto !== PROTO) return refuse('version');
         if (this.password && !sameText(str(msg.auth, 128), await proof(this.password, nonce, this.code))) return refuse('password');
-        if (this.members.size >= MAX_MEMBERS - 1 && !this.members.has(conn.peer)) return refuse('full');
+        if (this.members.size >= this.limit - 1 && !this.members.has(conn.peer)) return refuse('full');
         this.members.get(conn.peer)?.conn.close(); // reconexão do mesmo participante
         member = {
           conn,
@@ -355,7 +363,7 @@ export class Room {
       ...[...this.members.values()].map((m) => ({ ...m.entry })),
       ...[...this.pending.values()].map((p) => ({ ...p.entry })),
     ];
-    const msg: Msg = { t: 'room', peers: this.roster };
+    const msg: Msg = { t: 'room', peers: this.roster, limit: this.limit };
     for (const m of this.members.values()) if (m.conn.open) m.conn.send(msg);
     this.onroster(this.roster);
   }
@@ -585,6 +593,7 @@ export class Room {
           const list = cleanRoster(msg.peers);
           if (!list.some((p) => p.id === this.selfId)) return;
           this.roster = list;
+          if (msg.limit !== undefined) this.limit = clampLimit(msg.limit);
           this.onroster(this.roster);
         } else if (msg.t === 'cmd' && msg.cmd === 'mute') {
           this.oncommand('mute');
