@@ -182,6 +182,7 @@
           <button type="button" data-tab="voz">Voz</button>
           <button type="button" data-tab="clipes">Atalhos e clipes</button>
           <button type="button" data-tab="rede">Rede</button>
+          <button type="button" data-tab="desempenho">Desempenho</button>
           <button type="button" data-tab="extras">Overlay e chat</button>
         </div>
         <section data-pane="geral">
@@ -244,6 +245,23 @@
           <button id="btn-logs" type="button" class="ghost" title="Erros do app ficam anotados em um arquivo neste PC (nada é enviado)">Abrir pasta de logs</button>
         </div>
         <pre id="netcheck-out" class="netcheck" hidden></pre>
+        </section>
+        <section data-pane="desempenho" hidden>
+        <label class="check"><input id="set-hwaccel" type="checkbox" /> Usar aceleração de hardware (placa de vídeo)</label>
+        <p class="muted">Desligue se o PC travar ou engasgar enquanto transmite um jogo ou filme, ou se a placa de vídeo já estiver no limite. A interface e a codificação do vídeo passam para o processador.</p>
+        <label>Método de captura
+          <select id="set-capture">
+            <option value="modern">Moderno (Windows.Graphics.Capture) — recomendado</option>
+            <option value="compat">Compatível (método antigo)</option>
+          </select>
+        </label>
+        <p class="muted">Use o Compatível se alguma janela aparecer preta, congelada ou nem aparecer na lista (por exemplo, o navegador com a aceleração de hardware desligada). Transmitir a tela inteira costuma funcionar nos dois.</p>
+        <div id="gfx-restart" class="row between" hidden>
+          <span class="muted">Reinicie o AriranhaCast para aplicar.</span>
+          <button id="btn-gfx-restart" type="button" class="ghost">Reiniciar agora</button>
+        </div>
+        <label class="check"><input id="set-smooth" type="checkbox" /> Reprodução suave nas transmissões que eu assisto</label>
+        <p class="muted">Guarda um pouquinho de vídeo antes de exibir (cerca de 0,2 s a mais de atraso). Deixa filmes fluidos, sem engasgos nem tremidas, quando a rede oscila. Desligado = atraso mínimo, melhor para jogos. Vale a partir da próxima transmissão que você abrir.</p>
         </section>
         <section data-pane="extras" hidden>
           <h3>Overlay</h3>

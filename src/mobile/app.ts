@@ -3,12 +3,12 @@
 // não transmite e não repassa vídeo para ninguém (é sempre uma "folha" da árvore).
 import { measurePc } from '../renderer/link';
 import { Room } from '../renderer/room';
-import { loadIce, normalizeCode } from '../renderer/signaling';
+import { loadIce, net, normalizeCode } from '../renderer/signaling';
 import { playSfx, type Sfx } from '../renderer/sounds';
 import type { ChatMessage, Quality, RosterEntry, Settings } from '../renderer/types';
 import { GATE_MAX_DB, GATE_MIN_DB, loadVoicePrefs, Voice, type GateMode, type NsMode, type VoicePrefs } from '../renderer/voice';
 import { Watch } from '../renderer/watch';
-import { callStart, callStop, deviceStatus, keepScreenOn, native, setSpeaker } from './native';
+import { callStart, callStop, deviceStatus, keepScreenOn, native, onFullscreenExit, setFullscreen, setSpeaker } from './native';
 
 declare const __VERSION__: string;
 const VERSION = `${__VERSION__}-android`;
@@ -59,6 +59,14 @@ const store = {
   },
   set streamVolume(v: number) {
     localStorage.setItem('ariranhacast.svol', String(v));
+  },
+  /** Reprodução suave (buffer): ligada por padrão no celular, onde o Wi-Fi/4G oscila mais. */
+  get smooth(): boolean {
+    return localStorage.getItem('ariranhacast.smooth') !== '0';
+  },
+  set smooth(v: boolean) {
+    localStorage.setItem('ariranhacast.smooth', v ? '1' : '0');
+    net.smoothMs = v ? 200 : 0;
   },
   get bgVideo(): boolean {
     return localStorage.getItem('ariranhacast.bgvideo') === '1';
@@ -113,8 +121,11 @@ function settings(): Settings {
     overlayMode: 'speaking',
     clipSeconds: 0,
     clipWatched: false,
+    smoothPlayback: true,
   };
 }
+
+net.smoothMs = store.smooth ? 200 : 0;
 
 // ---------- estado ----------
 let room: Room | null = null;
@@ -553,7 +564,7 @@ function stopWatch(): void {
   v.srcObject = null;
   keepScreenOn(false);
   $('viewer').hidden = true;
-  if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  setFull(false);
   renderStreams();
 }
 
@@ -566,22 +577,30 @@ $('btn-stopwatch').onclick = () => {
   wantWatch = '';
   stopWatch();
 };
-$('btn-full').onclick = async () => {
-  const box = $('viewer');
-  if (document.fullscreenElement) return void document.exitFullscreen().catch(() => {});
-  try {
-    await box.requestFullscreen();
-    await (screen.orientation as any).lock?.('landscape').catch(() => {});
-  } catch {
-    /* sem tela cheia */
-  }
+// Tela cheia de verdade: o requestFullscreen do WebView só ocupa a área do app (as barras do
+// Android continuam lá). No app, o vídeo ocupa a página inteira e o Android esconde as barras de
+// status e de navegação (modo imersivo) e gira para paisagem; o botão voltar sai da tela cheia.
+let full = false;
+function setFull(on: boolean): void {
+  if (on === full) return;
+  full = on;
+  $('viewer').classList.toggle('full', on);
+  $('btn-full').textContent = on ? 'Sair da tela cheia' : 'Tela cheia';
+  if (native) return void setFullscreen(on);
+  if (on) void $('viewer').requestFullscreen().catch(() => {});
+  else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+}
+$('btn-full').onclick = (e) => {
+  e.stopPropagation();
+  setFull(!full);
 };
+onFullscreenExit(() => setFull(false));
 document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement) (screen.orientation as any).unlock?.();
+  if (!document.fullscreenElement && full && !native) setFull(false);
 });
 let toolsTimer = 0;
 $('viewer').onclick = () => {
-  if (!document.fullscreenElement) return;
+  if (!full) return;
   $('viewer').classList.add('tools');
   clearTimeout(toolsTimer);
   toolsTimer = window.setTimeout(() => $('viewer').classList.remove('tools'), 3000);
@@ -700,6 +719,7 @@ function openSettings(): void {
   $<HTMLSelectElement>('s-quality').value = store.quality;
   $<HTMLInputElement>('s-svol').value = String(store.streamVolume);
   $<HTMLInputElement>('s-bg').checked = store.bgVideo;
+  $<HTMLInputElement>('s-smooth').checked = store.smooth;
   void deviceStatus().then((d) => ($('s-about').textContent = `AriranhaCast ${VERSION}${d.model ? ` · ${d.model}` : ''}${d.sdk ? ` · Android API ${d.sdk}` : ''}`));
   syncSettings();
   $('settings').hidden = false;
@@ -773,6 +793,15 @@ $<HTMLInputElement>('s-svol').oninput = () => {
   syncSettings();
 };
 $<HTMLInputElement>('s-bg').onchange = () => (store.bgVideo = $<HTMLInputElement>('s-bg').checked);
+$<HTMLInputElement>('s-smooth').onchange = () => {
+  store.smooth = $<HTMLInputElement>('s-smooth').checked;
+  // O buffer é definido quando o vídeo começa a chegar: reabre a transmissão atual para aplicar.
+  if (watch && watchingId) {
+    const id = watchingId;
+    stopWatch();
+    startWatch(id);
+  }
+};
 
 // Relatório para colar numa conversa quando algo der errado (sem dados pessoais além dos nomes da sala).
 $('btn-report').onclick = async () => {

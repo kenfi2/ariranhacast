@@ -317,10 +317,12 @@ export class Incoming {
     };
     this.pc.onconnectionstatechange = () => this.onstate(this.pc.connectionState);
     this.pc.ontrack = (e) => {
-      // Sem buffer extra: exibe o quadro assim que chega (latência mínima).
+      // Buffer de reprodução: 0 = exibe o quadro assim que chega (latência mínima); com "reprodução
+      // suave" ligada, segura alguns quadros para exibir num ritmo constante (o áudio acompanha
+      // pela sincronia de lábios do próprio WebRTC).
       if (e.track.kind === 'video') {
         try {
-          (e.receiver as any).jitterBufferTarget = 0;
+          (e.receiver as any).jitterBufferTarget = net.smoothMs;
         } catch {
           /* API ausente */
         }

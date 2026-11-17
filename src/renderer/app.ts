@@ -7,7 +7,7 @@ import { ClipBuffer } from './clips';
 import { measurePc, type Route } from './link';
 import { describeNetwork, probeNetwork, type NetInfo } from './netcheck';
 import { hasTurn, loadIce, net, normalizeCode } from './signaling';
-import type { CodecChoice, EncodeOpts, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
+import type { CodecChoice, EncodeOpts, GfxConfig, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
 import { addSticker, listMyEmotes, listStickers } from './library';
 import { mountVoicePanel, mountVoiceSettings } from './voicePanel';
@@ -46,6 +46,7 @@ const ICON = {
 };
 
 // ---------- configurações ----------
+const SMOOTH_MS = 200;
 function loadSettings(): Settings {
   let saved: Partial<Settings> = {};
   try {
@@ -70,11 +71,13 @@ function loadSettings(): Settings {
     overlayMode: saved.overlayMode === 'all' ? 'all' : 'speaking',
     clipSeconds: saved.clipSeconds === 0 || saved.clipSeconds === 60 ? saved.clipSeconds : 30,
     clipWatched: saved.clipWatched !== false,
+    smoothPlayback: saved.smoothPlayback === true,
   };
 }
 let settings = loadSettings();
 function applySettings(): void {
   net.relayEconomy = settings.relayEconomy;
+  net.smoothMs = settings.smoothPlayback ? SMOOTH_MS : 0;
   void window.ariranhacast.setOverlay({ enabled: settings.overlayOn, corner: settings.overlayCorner, mode: settings.overlayMode });
 }
 applySettings();
@@ -188,7 +191,9 @@ $('btn-settings').onclick = () => {
   $<HTMLSelectElement>('set-ov-corner').value = settings.overlayCorner;
   $<HTMLSelectElement>('set-ov-mode').value = settings.overlayMode;
   $<HTMLInputElement>('set-giphy').value = settings.giphyKey;
+  $<HTMLInputElement>('set-smooth').checked = settings.smoothPlayback;
   void refreshFirewall();
+  void refreshGfx();
   unmountVoiceSettings();
   unmountVoiceSettings = mountVoiceSettings($('voice-settings'), () => voice);
   $<HTMLDialogElement>('dlg-settings').showModal();
@@ -204,6 +209,29 @@ function showTab(name: string): void {
   for (const p of document.querySelectorAll<HTMLElement>('#dlg-settings [data-pane]')) p.hidden = p.dataset.pane !== name;
 }
 for (const b of document.querySelectorAll<HTMLElement>('#dlg-settings .tabs button')) b.onclick = () => showTab(b.dataset.tab!);
+
+// Desempenho: gravado na hora (o processo principal lê ao iniciar) e só vale após reiniciar.
+function renderGfx(g: { current: GfxConfig; saved: GfxConfig }): void {
+  $<HTMLInputElement>('set-hwaccel').checked = g.saved.hwAccel;
+  $<HTMLSelectElement>('set-capture').value = g.saved.capture;
+  $('gfx-restart').hidden = g.current.hwAccel === g.saved.hwAccel && g.current.capture === g.saved.capture;
+}
+async function refreshGfx(): Promise<void> {
+  const g = await window.ariranhacast.gfxGet().catch(() => null);
+  if (g) renderGfx(g);
+}
+async function saveGfx(): Promise<void> {
+  const g = await window.ariranhacast
+    .gfxSet({ hwAccel: $<HTMLInputElement>('set-hwaccel').checked, capture: $<HTMLSelectElement>('set-capture').value === 'compat' ? 'compat' : 'modern' })
+    .catch(() => null);
+  if (g) renderGfx(g);
+}
+$<HTMLInputElement>('set-hwaccel').onchange = () => void saveGfx();
+$<HTMLSelectElement>('set-capture').onchange = () => void saveGfx();
+$('btn-gfx-restart').onclick = () => {
+  if (room && !confirm('Reiniciar agora? Você vai sair da sala e precisará entrar de novo.')) return;
+  void window.ariranhacast.relaunch();
+};
 
 const FW_TEXT: Record<string, string> = {
   ok: '✓ Firewall do Windows: liberado para o AriranhaCast.',
@@ -254,6 +282,7 @@ $<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
     overlayMode: $<HTMLSelectElement>('set-ov-mode').value as Settings['overlayMode'],
     clipSeconds: Number($<HTMLSelectElement>('set-clip-secs').value) as Settings['clipSeconds'],
     clipWatched: $<HTMLInputElement>('set-clip-watched').checked,
+    smoothPlayback: $<HTMLInputElement>('set-smooth').checked,
   };
   localStorage.setItem('ariranhacast.settings', JSON.stringify(settings));
   applySettings();
@@ -647,27 +676,35 @@ $('room-code').onclick = () => $('btn-copy').click();
 $('btn-panel').onclick = () => ($('room-side').hidden = !$('room-side').hidden);
 
 // ---------- barra de controles ----------
+/** Só troca o conteúdo se mudou: esta barra é atualizada a cada mudança de quem está falando. */
+function setHtml(e: HTMLElement, html: string): void {
+  if (e.dataset.html === html) return;
+  e.dataset.html = html;
+  e.innerHTML = html;
+}
+
+let lastInRoom = '';
 function updateControls(): void {
   const mic = $('btn-mic');
   const micOn = !!voice?.micOn;
-  mic.innerHTML = svg(ICON.mic + (micOn ? '' : SLASH));
+  setHtml(mic, svg(ICON.mic + (micOn ? '' : SLASH)));
   mic.classList.toggle('muted', !micOn);
   mic.title = micOn ? 'Desligar microfone' : 'Ligar microfone';
 
   const deaf = $('btn-deaf');
   const deafened = !!voice?.deafened;
-  deaf.innerHTML = svg(ICON.headset + (deafened ? SLASH : ''));
+  setHtml(deaf, svg(ICON.headset + (deafened ? SLASH : '')));
   deaf.classList.toggle('muted', deafened);
   deaf.title = deafened ? 'Voltar a ouvir as vozes' : 'Silenciar as vozes';
 
   const cam = $('btn-cam');
   const camOn = !!cams?.local;
-  cam.innerHTML = svg(ICON.cam + (camOn ? '' : SLASH));
+  setHtml(cam, svg(ICON.cam + (camOn ? '' : SLASH)));
   cam.classList.toggle('active', camOn);
   cam.title = camOn ? 'Desligar câmera' : 'Ligar câmera';
 
   const screen = $('btn-screen');
-  screen.innerHTML = svg(ICON.screen);
+  setHtml(screen, svg(ICON.screen));
   screen.classList.toggle('active', !!broadcast);
   screen.title = broadcast ? 'Parar de transmitir' : 'Transmitir tela';
 
@@ -675,17 +712,22 @@ function updateControls(): void {
   if (!chatBtn.querySelector('svg')) chatBtn.insertAdjacentHTML('afterbegin', svg(ICON.chat));
   chatBtn.classList.toggle('active', !$('chat-side').hidden);
   const clip = $('btn-clip');
-  clip.innerHTML = svg(ICON.clip);
+  setHtml(clip, svg(ICON.clip));
   clip.hidden = !settings.clipSeconds;
   clip.classList.toggle('dim', !clipBuf);
   const vclip = $('btn-vclip');
-  vclip.innerHTML = svg(ICON.vclip);
+  setHtml(vclip, svg(ICON.vclip));
   vclip.hidden = !settings.voiceSeconds;
   vclip.title = `Salvar clipe de voz: o que foi dito nos últimos ${settings.voiceSeconds}–${settings.voiceSeconds * 2} s${settings.hotVoice ? ` (${settings.hotVoice})` : ''}`;
   clip.title = clipBuf ? `Salvar clipe dos últimos ${settings.clipSeconds}–${settings.clipSeconds * 2} s${settings.hotClip ? ` (${settings.hotClip})` : ''}` : 'Clipes: transmita ou assista a uma transmissão para ter o que salvar';
   $('btn-pause').textContent = broadcast?.paused ? 'Retomar transmissão' : 'Pausar transmissão';
-  $('btn-leave').innerHTML = svg(ICON.hangup);
-  void window.ariranhacast.setInRoom(!!room, micOn);
+  setHtml($('btn-leave'), svg(ICON.hangup));
+  // Só avisa o processo principal quando muda (ele atualiza o ícone da bandeja do Windows).
+  const inRoomKey = `${!!room}|${micOn}`;
+  if (inRoomKey !== lastInRoom) {
+    lastInRoom = inRoomKey;
+    void window.ariranhacast.setInRoom(!!room, micOn);
+  }
 }
 
 $('btn-mic').onclick = () => void toggleMic();

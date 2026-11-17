@@ -61,6 +61,29 @@ function writeLog(level: 'info' | 'warn' | 'error', source: string, message: unk
 process.on('uncaughtException', (e) => writeLog('error', 'main', e));
 process.on('unhandledRejection', (e) => writeLog('error', 'main (promise)', e));
 
+// ---- desempenho gráfico (Configurações > Desempenho) ----
+// Lido antes do app iniciar: são opções do Chromium que só valem com o app reiniciado.
+//  hwAccel: aceleração de hardware (GPU) da interface e do vídeo. Desligar ajuda em PCs em que a
+//    GPU está no limite com o jogo/filme, ou com drivers problemáticos; o encode passa para a CPU.
+//  capture: 'modern' usa o Windows.Graphics.Capture (padrão); 'compat' usa os métodos antigos
+//    (DXGI para telas, GDI para janelas), útil quando uma janela aparece preta ou nem aparece
+//    (ex.: navegador com a aceleração de hardware desligada).
+type Gfx = { hwAccel: boolean; capture: 'modern' | 'compat' };
+const gfxFile = (): string => path.join(app.getPath('userData'), 'graphics.json');
+function cleanGfx(v: unknown): Gfx {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  return { hwAccel: o.hwAccel !== false, capture: o.capture === 'compat' ? 'compat' : 'modern' };
+}
+function loadGfx(): Gfx {
+  try {
+    return cleanGfx(JSON.parse(fs.readFileSync(gfxFile(), 'utf8')));
+  } catch {
+    return cleanGfx({});
+  }
+}
+const gfx = loadGfx(); // o que está valendo nesta execução
+if (!gfx.hwAccel) app.disableHardwareAcceleration();
+
 // O caminho crítico (captura, encode, rede) roda em C++ dentro do Chromium/libwebrtc.
 // Estes switches garantem encoder/decoder por hardware e evitam que o Chromium
 // reduza a prioridade do app quando a janela está minimizada ou atrás do jogo.
@@ -70,7 +93,9 @@ app.commandLine.appendSwitch(
 );
 // WebRtcWgcRequireBorder desligado: pede ao Windows para não desenhar a borda amarela em volta
 // do que está sendo capturado (o Windows 10 ignora o pedido na captura de janelas).
-app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns,WebRtcWgcRequireBorder');
+const disabled = ['WebRtcHideLocalIpsWithMdns', 'WebRtcWgcRequireBorder'];
+if (gfx.capture === 'compat') disabled.push('AllowWgcScreenCapturer', 'AllowWgcWindowCapturer');
+app.commandLine.appendSwitch('disable-features', disabled.join(','));
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
@@ -84,6 +109,7 @@ let inRoom = false;
 let micOn = false;
 let quitting = false;
 let trayHintShown = false;
+let flashing = false;
 
 const INDEX = path.join(__dirname, 'renderer', 'index.html');
 const SOURCE_ID = /^(screen|window):\d{1,20}:\d{1,10}$/;
@@ -295,6 +321,7 @@ function updateOverlay(): void {
   if (overlay && !overlay.isDestroyed()) {
     placeOverlay();
     overlay.webContents.send('lc:ov-config', overlayCfg);
+    syncOverlayVisible();
     return;
   }
   overlay = new BrowserWindow({
@@ -318,9 +345,23 @@ function updateOverlay(): void {
   overlay.webContents.once('did-finish-load', () => {
     placeOverlay();
     overlay?.webContents.send('lc:ov-config', overlayCfg);
-    overlay?.showInactive();
+    overlay?.webContents.send('lc:ov-rows', overlayRows);
+    syncOverlayVisible();
   });
   overlay.on('closed', () => (overlay = null));
+}
+
+/**
+ * A janela do overlay fica sempre por cima de tudo. Mesmo transparente, ela atrapalha o Windows a
+ * reconhecer jogos e vídeos em tela cheia (barra de tarefas aparecendo, perda de fluidez). Por isso
+ * só fica visível enquanto há algo para mostrar; com ninguém falando, ela some de verdade.
+ */
+let overlayRows: { name: string; color: string; speaking: boolean; muted: boolean }[] = [];
+function syncOverlayVisible(): void {
+  if (!overlay || overlay.isDestroyed() || overlay.webContents.isLoading()) return;
+  const want = overlayRows.some((r) => overlayCfg.mode === 'all' || r.speaking);
+  if (want && !overlay.isVisible()) overlay.showInactive();
+  else if (!want && overlay.isVisible()) overlay.hide();
 }
 
 function cleanOverlayCfg(v: unknown): OverlayCfg {
@@ -357,8 +398,16 @@ function showWindow(): void {
   win.focus();
 }
 
+// Cada setToolTip/setContextMenu vira uma mensagem para o Explorer (Shell_NotifyIcon). Antes isso
+// acontecia a cada mudança de "quem está falando" (várias vezes por segundo, por horas) e
+// sobrecarregava o Explorer: Alt+Tab lento, barra de tarefas por cima da tela cheia. Agora só
+// quando o que aparece na bandeja muda de fato.
+let trayKey = '';
 function refreshTray(): void {
   if (!tray) return;
+  const key = `${inRoom}|${micOn}`;
+  if (key === trayKey) return;
+  trayKey = key;
   tray.setToolTip(inRoom ? `AriranhaCast · na sala · microfone ${micOn ? 'ligado' : 'desligado'}` : 'AriranhaCast');
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -702,6 +751,11 @@ function createWindow(): void {
       tray.displayBalloon({ title: 'AriranhaCast continua aberto', content: 'Você ainda está na sala. Use o ícone da bandeja para voltar ou sair.' });
     }
   });
+  win.on('focus', () => {
+    if (!flashing) return;
+    flashing = false;
+    win?.flashFrame(false);
+  });
   win.on('closed', () => (win = null));
 }
 
@@ -743,7 +797,8 @@ app.whenReady().then(() => {
     async (_request, callback) => {
       try {
         if (!pending) return callback({});
-        const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+        // Sem miniaturas: aqui só precisamos achar a fonte (gerar miniatura de cada janela é caro).
+        const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
         const source = sources.find((s) => s.id === pending?.id);
         if (!source) return callback({});
         const wantAudio = pending.audio && process.platform === 'win32';
@@ -814,6 +869,21 @@ app.whenReady().then(() => {
     refreshTray();
     updateOverlay();
   });
+  handle('lc:gfx-get', () => ({ current: gfx, saved: loadGfx() }));
+  handle('lc:gfx-set', (cfg: unknown) => {
+    const clean = cleanGfx(cfg);
+    try {
+      fs.writeFileSync(gfxFile(), JSON.stringify(clean));
+    } catch (e) {
+      writeLog('error', 'desempenho', e);
+    }
+    return { current: gfx, saved: loadGfx() };
+  });
+  handle('lc:relaunch', () => {
+    quitting = true;
+    app.relaunch();
+    app.quit();
+  });
   handle('lc:open-external', (url: unknown) => openExternal(url));
   handle('lc:log', (text: unknown) => writeLog('error', 'janela', String(text ?? '').slice(0, 2000)));
   handle('lc:open-logs', async () => {
@@ -826,8 +896,12 @@ app.whenReady().then(() => {
   handle('lc:show-clip', (file: unknown) => {
     if (typeof file === 'string' && path.dirname(path.resolve(file)) === path.resolve(clipDir())) shell.showItemInFolder(path.resolve(file));
   });
+  // Pisca o ícone na barra de tarefas uma vez por "ausência" (não a cada mensagem): piscar de
+  // novo e de novo faz o Windows mostrar a barra de tarefas por cima de jogos e vídeos em tela cheia.
   handle('lc:flash', () => {
-    if (win && !win.isFocused()) win.flashFrame(true);
+    if (!win || win.isFocused() || flashing) return;
+    flashing = true;
+    win.flashFrame(true);
   });
   handle('lc:gif-search', (key: unknown, q: unknown) => gifSearch(key, q));
   handle('lc:gif-fetch', (url: unknown) => gifFetch(url));
@@ -842,17 +916,20 @@ app.whenReady().then(() => {
   });
   // O renderer envia as linhas do overlay (nomes e estado de fala) e o main repassa à janela do overlay.
   ipcMain.on('lc:overlay-rows', (e, rows: unknown) => {
-    if (!trusted(e as unknown as IpcMainInvokeEvent) || !Array.isArray(rows) || !overlay || overlay.isDestroyed()) return;
+    if (!trusted(e as unknown as IpcMainInvokeEvent) || !Array.isArray(rows)) return;
     const clean = rows.slice(0, 16).map((r) => ({
       name: String(r?.name ?? '').replace(/[\p{Cc}\p{Cf}]/gu, '').slice(0, 24),
       color: /^#[0-9a-f]{6}$/i.test(String(r?.color)) ? String(r.color) : '#7c8cff',
       speaking: r?.speaking === true,
       muted: r?.muted === true,
     }));
+    overlayRows = clean;
+    if (!overlay || overlay.isDestroyed()) return;
     overlay.webContents.send('lc:ov-rows', clean);
+    syncOverlayVisible();
   });
 
-  writeLog('info', 'main', `AriranhaCast ${app.getVersion()} · Electron ${process.versions.electron} · ${process.platform} ${os.release()} ${process.arch} · livre no disco: ${freeMB() ?? '?'} MB`);
+  writeLog('info', 'main', `AriranhaCast ${app.getVersion()} · Electron ${process.versions.electron} · ${process.platform} ${os.release()} ${process.arch} · livre no disco: ${freeMB() ?? '?'} MB · GPU ${gfx.hwAccel ? 'ligada' : 'desligada'} · captura ${gfx.capture}`);
   app.on('child-process-gone', (_e, d) => {
     if (d.reason !== 'clean-exit') writeLog('error', 'main', `processo ${d.type}${d.name ? ` (${d.name})` : ''} encerrou: ${d.reason} (código ${d.exitCode})`);
   });

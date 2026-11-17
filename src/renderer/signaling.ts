@@ -79,7 +79,13 @@ export function hasTurn(): boolean {
 }
 
 /** Preferências de rede ajustáveis em Configurações (lidas por quem envia vídeo). */
-export const net = { relayEconomy: true };
+/**
+ * relayEconomy: menos qualidade quando a conexão passa pelo TURN.
+ * smoothMs: atraso de reprodução (buffer) do vídeo assistido. 0 = latência mínima (cada quadro é
+ * exibido assim que chega, bom para jogos); um pouco de buffer deixa filmes mais fluidos em
+ * redes instáveis (Wi-Fi, celular), sem engasgos nem "piscadas".
+ */
+export const net = { relayEconomy: true, smoothMs: 0 };
 
 /** Só para testes: força todo o tráfego pelo TURN, simulando uma rede que não fecha conexão direta. */
 export const relayOnly = new URLSearchParams(location.search).has('relayonly');

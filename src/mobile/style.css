@@ -63,10 +63,15 @@ li.speaking .avatar { box-shadow: 0 0 0 3px rgba(61,214,140,.45); }
 .viewer-tools { display: flex; gap: 6px; padding: 8px; background: var(--panel); }
 .viewer-tools select { margin: 0; padding: 8px; font-size: 13px; flex: 1; }
 .viewer-tools button { padding: 8px 10px; font-size: 13px; }
-#viewer:fullscreen { display: flex; flex-direction: column; justify-content: center; }
-#viewer:fullscreen video { aspect-ratio: auto; height: 100%; }
-#viewer:fullscreen .viewer-tools { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.55); opacity: 0; transition: opacity .2s; }
-#viewer:fullscreen.tools .viewer-tools { opacity: 1; }
+/* Tela cheia: o vídeo ocupa a página inteira (o Android esconde as barras do sistema).
+   Os controles e o texto de status só aparecem ao tocar e somem de verdade (visibility),
+   para não ficar nada desenhado por cima do vídeo — elementos sobrepostos fazem o WebView
+   compor o vídeo de outro jeito e isso pode causar tremidas. */
+#viewer.full { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; justify-content: center; }
+#viewer.full video { aspect-ratio: auto; width: 100%; height: 100%; }
+#viewer.full .viewer-tools, #viewer.full #viewer-status { visibility: hidden; }
+#viewer.full .viewer-tools { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.55); padding: 8px calc(8px + env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) calc(8px + env(safe-area-inset-left, 0px)); }
+#viewer.full.tools .viewer-tools, #viewer.full.tools #viewer-status { visibility: visible; }
 
 /* chat */
 #chat { position: absolute; inset: var(--top) 0 0; z-index: 5; display: flex; flex-direction: column; background: var(--bg); padding-bottom: var(--bottom); }

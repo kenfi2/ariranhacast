@@ -24,6 +24,9 @@ export interface AriranhaBridge {
   onUpdater(cb: (s: UpdaterState) => void): void;
   firewallStatus(): Promise<FirewallState>;
   firewallFix(): Promise<FirewallState>;
+  gfxGet(): Promise<{ current: GfxConfig; saved: GfxConfig }>;
+  gfxSet(cfg: GfxConfig): Promise<{ current: GfxConfig; saved: GfxConfig }>;
+  relaunch(): Promise<void>;
   openExternal(url: string): Promise<boolean>;
   saveClip(data: ArrayBuffer, ext: string, voice?: boolean): Promise<{ ok: boolean; path?: string; error?: string }>;
   showClip(path: string): Promise<void>;
@@ -37,6 +40,11 @@ export interface AriranhaBridge {
   pendingDeepLink(): Promise<string>;
   logError(text: string): Promise<void>;
   openLogs(): Promise<boolean>;
+}
+
+export interface GfxConfig {
+  hwAccel: boolean;
+  capture: 'modern' | 'compat';
 }
 
 export interface GifItem {
@@ -172,4 +180,5 @@ export interface Settings {
   overlayMode: 'speaking' | 'all';
   clipSeconds: 0 | 30 | 60; // replay: quanto tempo para trás um clipe alcança (0 = desligado)
   clipWatched: boolean; // também grava as transmissões que você assiste
+  smoothPlayback: boolean; // buffer de reprodução nas transmissões assistidas (filmes)
 }

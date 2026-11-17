@@ -1,15 +1,23 @@
 package dev.ariranhacast.app;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
+import android.view.Window;
 import android.view.WindowManager;
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -23,6 +31,63 @@ import java.util.List;
  */
 @CapacitorPlugin(name = "Call")
 public class CallPlugin extends Plugin {
+
+    private boolean fullscreen = false;
+
+    /** Com o vídeo em tela cheia, o botão voltar só sai da tela cheia (avisa a página). */
+    // Registrado ao entrar na tela cheia: o último registrado tem prioridade sobre o do Capacitor.
+    private final OnBackPressedCallback backExitsFullscreen = new OnBackPressedCallback(true) {
+        @Override
+        public void handleOnBackPressed() {
+            notifyListeners("fullscreenExit", new JSObject());
+        }
+    };
+
+    /**
+     * Tela cheia de verdade (modo imersivo): esconde a barra de status e a de navegação (voltam
+     * por um instante ao deslizar da borda), usa a área do entalhe da câmera e gira para paisagem.
+     */
+    @PluginMethod
+    public void fullscreen(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        getActivity().runOnUiThread(() -> {
+            fullscreen = on;
+            applyFullscreen();
+            backExitsFullscreen.remove();
+            Activity a = getActivity();
+            if (on && a instanceof AppCompatActivity) {
+                ((AppCompatActivity) a).getOnBackPressedDispatcher().addCallback((AppCompatActivity) a, backExitsFullscreen);
+            }
+        });
+        call.resolve();
+    }
+
+    private void applyFullscreen() {
+        Activity a = getActivity();
+        Window w = a.getWindow();
+        WindowInsetsControllerCompat c = WindowCompat.getInsetsController(w, w.getDecorView());
+        if (fullscreen) {
+            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            c.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            c.show(WindowInsetsCompat.Type.systemBars());
+        }
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.layoutInDisplayCutoutMode = fullscreen
+                ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+            w.setAttributes(lp);
+        }
+        a.setRequestedOrientation(fullscreen ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+    }
+
+    /** Ao voltar de outro app o Android pode reexibir as barras: reaplica o modo imersivo. */
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        if (fullscreen) getActivity().runOnUiThread(this::applyFullscreen);
+    }
 
     @PluginMethod
     public void start(PluginCall call) {
