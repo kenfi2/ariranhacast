@@ -392,3 +392,19 @@ body.has-lobby .home-main { align-items: stretch; }
 /* limite de pessoas ao criar sala */
 .limit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
 .limit-row input { width: 80px; margin: 0; text-align: center; }
+
+/* ---------- Novidades ---------- */
+dialog#dlg-news { width: 560px; max-height: 82vh; padding: 0; }
+#dlg-news form { display: flex; flex-direction: column; max-height: 82vh; padding: 20px 22px; box-sizing: border-box; }
+#dlg-news h2 { margin: 0; }
+#news-intro { margin: 8px 0 0; }
+.news-list { overflow-y: auto; margin-top: 12px; padding-right: 4px; flex: 1; min-height: 0; }
+.news-ver { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; background: var(--panel2); }
+.news-ver.cur, .news-ver.next { border-color: var(--accent2); }
+.news-ver h3 { margin: 0 0 6px; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.news-tag { font-size: 11px; text-transform: lowercase; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: var(--accent2); color: #fff; }
+.news-ver.next .news-tag { background: var(--ok); color: #062014; }
+.news-date { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--muted); }
+.news-ver ul { margin: 0; padding-left: 18px; }
+.news-ver li { margin: 3px 0; line-height: 1.45; }
+#news-actions { margin-top: 12px; }

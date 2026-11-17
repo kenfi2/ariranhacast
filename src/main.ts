@@ -777,14 +777,21 @@ type UpdState =
   | { state: 'disabled'; reason: 'dev' | 'portatil' | 'sem-url' }
   | { state: 'checking' }
   | { state: 'uptodate' }
-  | { state: 'available'; version: string }
-  | { state: 'downloading'; version: string; percent: number }
-  | { state: 'ready'; version: string }
+  | { state: 'available'; version: string; notes?: string }
+  | { state: 'downloading'; version: string; percent: number; notes?: string }
+  | { state: 'ready'; version: string; notes?: string }
   | { state: 'error'; message: string };
 
 let upd: UpdState = { state: 'disabled', reason: dev ? 'dev' : 'portatil' };
 let updater: typeof import('electron-updater').autoUpdater | null = null;
 let updVersion = '';
+let updNotes = ''; // novidades da versão nova (releaseNotes do latest.yml)
+
+// Só texto puro e curto: a tela monta a lista com textContent.
+function notesText(n: unknown): string {
+  const raw = Array.isArray(n) ? n.map((x) => (x as { note?: unknown })?.note ?? '').join('\n') : n;
+  return typeof raw === 'string' ? raw.slice(0, 8000) : '';
+}
 
 function setUpd(s: UpdState): void {
   upd = s;
@@ -822,7 +829,7 @@ function startUpdater(): void {
     const fakes: Record<string, UpdState> = {
       checking: { state: 'checking' },
       downloading: { state: 'downloading', version: '0.3.2', percent: 45 },
-      ready: { state: 'ready', version: '0.3.2' },
+      ready: { state: 'ready', version: '9.9.9', notes: '- Novidade de teste.\n- PC: só no PC.\n- Android: não aparece no PC.' },
       error: { state: 'error', message: 'o arquivo da nova versão não está na release (erro 404).' },
       uptodate: { state: 'uptodate' },
     };
@@ -843,11 +850,12 @@ function startUpdater(): void {
     autoUpdater.allowDowngrade = false;
     autoUpdater.on('update-available', (info) => {
       updVersion = info.version;
-      setUpd({ state: 'available', version: info.version });
+      updNotes = notesText(info.releaseNotes);
+      setUpd({ state: 'available', version: info.version, notes: updNotes });
     });
     autoUpdater.on('update-not-available', () => setUpd({ state: 'uptodate' }));
-    autoUpdater.on('download-progress', (p) => setUpd({ state: 'downloading', version: updVersion, percent: Math.max(0, Math.min(100, Math.round(p.percent))) }));
-    autoUpdater.on('update-downloaded', (info) => setUpd({ state: 'ready', version: info.version }));
+    autoUpdater.on('download-progress', (p) => setUpd({ state: 'downloading', version: updVersion, percent: Math.max(0, Math.min(100, Math.round(p.percent))), notes: updNotes }));
+    autoUpdater.on('update-downloaded', (info) => setUpd({ state: 'ready', version: info.version, notes: notesText(info.releaseNotes) || updNotes }));
     autoUpdater.on('error', (e) => {
       writeLog('error', 'atualização', e);
       setUpd({ state: 'error', message: shortError(e) });

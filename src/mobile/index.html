@@ -13,11 +13,12 @@
     <div class="hero">
       <img src="icon.png" alt="" class="hero-logo" />
       <h1>AriranhaCast</h1>
-      <p class="muted" id="version"></p>
+      <p class="muted"><span id="version"></span> · <button id="btn-news" type="button" class="link">Novidades</button></p>
       <button id="btn-gear-home" class="gear" title="Configurações"></button>
     </div>
     <div id="update-bar" class="update-bar" hidden>
       <span id="update-text"></span>
+      <button id="btn-update-news" type="button">O que mudou</button>
       <button id="btn-update" type="button" class="primary">Atualizar</button>
     </div>
     <!-- login (obrigatório quando o app tem servidor de lobby) -->
@@ -150,6 +151,15 @@
   </section>
 
   <!-- pessoa -->
+  <section id="news" class="sheet" hidden>
+    <header class="sheet-top"><strong id="news-title">Novidades</strong><button id="btn-news-close">Fechar</button></header>
+    <div class="sheet-body">
+      <p id="news-intro" class="muted" hidden></p>
+      <div id="news-list" class="news-list"></div>
+      <button id="news-install" type="button" class="primary wide" hidden>Atualizar agora</button>
+    </div>
+  </section>
+
   <section id="person" class="sheet small" hidden>
     <header class="sheet-top"><strong id="p-name"></strong><button id="btn-person-close">Fechar</button></header>
     <div class="sheet-body">

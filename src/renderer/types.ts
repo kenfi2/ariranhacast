@@ -90,9 +90,9 @@ export type UpdaterState =
   | { state: 'disabled'; reason: 'dev' | 'portatil' | 'sem-url' }
   | { state: 'checking' }
   | { state: 'uptodate' }
-  | { state: 'available'; version: string }
-  | { state: 'downloading'; version: string; percent: number }
-  | { state: 'ready'; version: string }
+  | { state: 'available'; version: string; notes?: string }
+  | { state: 'downloading'; version: string; percent: number; notes?: string }
+  | { state: 'ready'; version: string; notes?: string }
   | { state: 'error'; message: string };
 
 export type FirewallState = 'ok' | 'missing' | 'blocked' | 'unknown' | 'na';

@@ -8,11 +8,12 @@
   </head>
   <body>
     <header id="topbar">
-      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
+      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-news" type="button" class="ghost small" title="O que mudou em cada versão">Novidades</button><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
       <div id="upd" class="upd" hidden>
         <span id="upd-spin" class="spinner" hidden aria-hidden="true"></span>
         <span id="upd-text" role="status"></span>
         <span id="upd-bar" class="bar" hidden><i></i></span>
+        <button id="upd-news" type="button" class="ghost small" hidden>O que mudou</button>
         <button id="upd-btn" type="button" class="primary small" hidden></button>
       </div>
       <div class="top-right">
@@ -347,6 +348,21 @@
         </section>
         <div class="row end">
           <button id="set-save" class="primary" value="save">Salvar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Novidades (CHANGELOG.md embutido no app) -->
+    <dialog id="dlg-news">
+      <form method="dialog">
+        <div class="row between">
+          <h2 id="news-title">Novidades</h2>
+          <button class="ghost small" value="close" aria-label="Fechar">Fechar</button>
+        </div>
+        <p id="news-intro" class="muted" hidden></p>
+        <div id="news-list" class="news-list"></div>
+        <div id="news-actions" class="row end" hidden>
+          <button id="news-install" type="button" class="primary">Reiniciar e atualizar</button>
         </div>
       </form>
     </dialog>

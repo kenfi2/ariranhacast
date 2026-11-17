@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { cpSync, mkdirSync } from 'node:fs';
+import { loadChangelog } from './changelog.mjs';
 
 mkdirSync('dist', { recursive: true });
 const common = { bundle: true, sourcemap: false, minify: false, logLevel: 'info' };
@@ -9,7 +10,9 @@ await build({ ...common, entryPoints: ['src/main.ts'], outfile: 'dist/main.js',
 await build({ ...common, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.js',
   platform: 'node', format: 'cjs', external: ['electron'] });
 await build({ ...common, entryPoints: ['src/renderer/app.ts'], outfile: 'dist/renderer/app.js',
-  platform: 'browser', format: 'iife', target: 'chrome130', loader: { '.wasm': 'binary' } });
+  platform: 'browser', format: 'iife', target: 'chrome130', loader: { '.wasm': 'binary' },
+  // Página "Novidades": o CHANGELOG.md vai junto no app (funciona sem internet).
+  define: { __CHANGELOG__: JSON.stringify(loadChangelog()) } });
 
 await build({ ...common, entryPoints: ['src/overlay-preload.ts'], outfile: 'dist/overlay-preload.js',
   platform: 'node', format: 'cjs', external: ['electron'] });

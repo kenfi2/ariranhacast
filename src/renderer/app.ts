@@ -16,6 +16,9 @@ import { mountVoicePanel, mountVoiceSettings } from './voicePanel';
 import { playSfx, type Sfx } from './sounds';
 import { formatBytes, TurnMeter } from './turnmeter';
 import { Watch } from './watch';
+import { forPlatform, parseNotes, renderChangelog, shouldShowAfterUpdate, type ChangeEntry } from '../shared/changelog';
+
+declare const __CHANGELOG__: ChangeEntry[];
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
@@ -87,6 +90,8 @@ let appVersion = '';
 void window.ariranhacast.appVersion().then((v) => {
   appVersion = v;
   $('app-version').textContent = `versão ${v}`;
+  // Acabou de atualizar? Mostra o que mudou (uma vez só; não na primeira instalação).
+  if (!testing && shouldShowAfterUpdate(v) && CHANGELOG.some((e) => e.version === v)) setTimeout(() => openNews(true), 600);
 });
 window.ariranhacast.onUpdate((text) => toast(text));
 
@@ -114,6 +119,7 @@ function renderUpdater(s: UpdaterState): void {
   bar.hidden = s.state !== 'downloading';
   btn.hidden = !(s.state === 'ready' || s.state === 'error');
   btn.disabled = false;
+  $('upd-news').hidden = !(s.state === 'available' || s.state === 'downloading' || s.state === 'ready');
   switch (s.state) {
     case 'checking':
       text.textContent = 'Verificando atualizações…';
@@ -170,9 +176,41 @@ $('upd-btn').onclick = () => {
 };
 $('btn-upd-check').onclick = () => void window.ariranhacast.updaterCheck();
 $('btn-upd-top').onclick = () => void window.ariranhacast.updaterCheck();
+// ---- Novidades: o CHANGELOG.md embutido + as novidades da versão que está chegando ----
+const CHANGELOG = forPlatform(__CHANGELOG__, 'pc');
+function pendingEntry(): ChangeEntry | undefined {
+  const s = lastUpd;
+  if (s.state !== 'available' && s.state !== 'downloading' && s.state !== 'ready') return undefined;
+  const items = parseNotes(s.notes).filter((i) => i.only !== 'android');
+  return { version: s.version, date: '', items: items.length ? items : [{ text: 'Correções e melhorias.' }] };
+}
+function openNews(justUpdated = false): void {
+  const dlg = $<HTMLDialogElement>('dlg-news');
+  const pending = pendingEntry();
+  const ready = lastUpd.state === 'ready';
+  const intro = $('news-intro');
+  $('news-title').textContent = justUpdated ? `Atualizado para a versão ${appVersion}` : pending ? `Versão ${pending.version} ${ready ? 'pronta' : 'chegando'}` : 'Novidades';
+  intro.hidden = !(justUpdated || pending);
+  intro.textContent = justUpdated
+    ? 'Veja o que mudou. Esta lista fica sempre em "Novidades", no topo da janela.'
+    : ready
+      ? 'A versão nova já foi baixada. Ela entra quando você reiniciar o app (ou sozinha, ao fechar).'
+      : 'A versão nova está sendo baixada.';
+  renderChangelog($('news-list'), CHANGELOG, appVersion, pending);
+  $('news-actions').hidden = !ready;
+  if (!dlg.open) dlg.showModal();
+  $('news-list').scrollTop = 0;
+}
+$('btn-news').onclick = () => openNews();
+$('upd-news').onclick = () => openNews();
+$('news-install').onclick = () => {
+  $<HTMLDialogElement>('dlg-news').close();
+  $('upd-btn').click(); // mesmo caminho do botão do topo (pede confirmação se estiver numa sala)
+};
+
 window.ariranhacast.onUpdater((s) => {
   renderUpdater(s);
-  if (s.state === 'ready') toast(`Versão ${s.version} baixada. Clique em "Reiniciar e atualizar" quando quiser.`);
+  if (s.state === 'ready') toast(`Versão ${s.version} baixada. Veja em "O que mudou" e clique em "Reiniciar e atualizar" quando quiser.`);
 });
 void window.ariranhacast.updaterState().then(renderUpdater);
 

@@ -9,11 +9,13 @@ import { playSfx, type Sfx } from '../renderer/sounds';
 import type { ChatMessage, Quality, RosterEntry, Settings } from '../renderer/types';
 import { GATE_MAX_DB, GATE_MIN_DB, loadVoicePrefs, Voice, type GateMode, type NsMode, type VoicePrefs } from '../renderer/voice';
 import { Watch } from '../renderer/watch';
+import { forPlatform, parseNotes, renderChangelog, shouldShowAfterUpdate, type ChangeEntry } from '../shared/changelog';
 import { callStart, callStop, deviceStatus, fetchText, installUpdate, keepScreenOn, native, onAppLink, onFullscreenExit, openBrowser, setFullscreen, setSpeaker } from './native';
 
 declare const __VERSION__: string;
 declare const __LOBBY_URL__: string;
 declare const __UPDATE_URL__: string;
+declare const __CHANGELOG__: ChangeEntry[];
 const VERSION = `${__VERSION__}-android`;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -396,7 +398,7 @@ $('btn-logout').onclick = () => {
 // Cada release publica o APK e o latest-android.json ({version, apk, sha256}). O app confere ao
 // abrir; com versão nova, mostra "Atualizar": baixa, confere o SHA-256 e abre o instalador do Android.
 let lastUpdateCheck = 0;
-let updateInfo: { version: string; apk: string; sha256: string } | null = null;
+let updateInfo: { version: string; apk: string; sha256: string; notes: string[] } | null = null;
 
 function newer(a: string, b: string): boolean {
   const pa = a.split('.').map(Number);
@@ -415,13 +417,40 @@ async function checkUpdate(): Promise<void> {
     const sha256 = String(j?.sha256 ?? '').toLowerCase();
     if (!/^\d+\.\d+\.\d+$/.test(version) || !/^AriranhaCast-Android-[\d.]+\.apk$/.test(apk) || !/^[0-9a-f]{64}$/.test(sha256)) return;
     if (!newer(version, __VERSION__)) return;
-    updateInfo = { version, apk, sha256 };
+    const notes = Array.isArray(j?.notes) ? j.notes.slice(0, 40).map(String) : [];
+    updateInfo = { version, apk, sha256, notes };
     $('update-text').textContent = `Versão ${version} disponível.`;
     $('update-bar').hidden = false;
   } catch {
     /* sem rede ou release sem o arquivo: tenta na próxima vez */
   }
 }
+
+// ---------- novidades ----------
+const CHANGELOG = forPlatform(__CHANGELOG__, 'android');
+function openNews(justUpdated = false): void {
+  const info = updateInfo;
+  let pending: ChangeEntry | undefined;
+  if (info) {
+    const items = parseNotes(info.notes).filter((i) => i.only !== 'pc');
+    pending = { version: info.version, date: '', items: items.length ? items : [{ text: 'Correções e melhorias.' }] };
+  }
+  $('news-title').textContent = justUpdated ? `Atualizado para a ${__VERSION__}` : pending ? `Versão ${pending.version} disponível` : 'Novidades';
+  const intro = $('news-intro');
+  intro.hidden = !(justUpdated || pending);
+  intro.textContent = justUpdated ? 'Veja o que mudou. Esta lista fica sempre em "Novidades", na tela inicial.' : 'Toque em "Atualizar agora" para baixar e instalar.';
+  renderChangelog($('news-list'), CHANGELOG, __VERSION__, pending);
+  $('news-install').hidden = !pending;
+  $('news').hidden = false;
+}
+$('btn-news').onclick = () => openNews();
+$('btn-update-news').onclick = () => openNews();
+$('btn-news-close').onclick = () => ($('news').hidden = true);
+$('news-install').onclick = () => {
+  $('news').hidden = true;
+  $('btn-update').click();
+};
+if (shouldShowAfterUpdate(__VERSION__) && CHANGELOG.some((e) => e.version === __VERSION__)) setTimeout(() => openNews(true), 600);
 
 $('btn-update').onclick = async () => {
   const info = updateInfo;
@@ -980,7 +1009,8 @@ $('chat-input').oninput = () => room?.sendTyping();
 
 // Botão "voltar" do Android: fecha o chat / sai da tela cheia antes de qualquer outra coisa.
 window.addEventListener('popstate', () => {
-  if (!$('person').hidden) $('person').hidden = true;
+  if (!$('news').hidden) $('news').hidden = true;
+  else if (!$('person').hidden) $('person').hidden = true;
   else if (!$('settings').hidden) closeSettings();
   else if (!$('chat').hidden) $('chat').hidden = true;
   history.pushState(null, '', location.href);

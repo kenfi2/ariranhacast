@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadChangelog } from './changelog.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'mobile', 'www');
@@ -21,7 +22,7 @@ await build({
   format: 'iife',
   target: 'chrome120',
   loader: { '.wasm': 'binary' },
-  define: { __VERSION__: JSON.stringify(version), __LOBBY_URL__: JSON.stringify(lobbyUrl), __UPDATE_URL__: JSON.stringify(updateUrl) },
+  define: { __VERSION__: JSON.stringify(version), __LOBBY_URL__: JSON.stringify(lobbyUrl), __UPDATE_URL__: JSON.stringify(updateUrl), __CHANGELOG__: JSON.stringify(loadChangelog(version)) },
   // @capacitor/core vem do pacote do app Android
   nodePaths: [join(root, 'mobile', 'node_modules')],
   logLevel: 'info',

@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { checkObs } from './check-obs.mjs';
 import { hardenExe } from './harden-exe.mjs';
+import { loadChangelog } from './changelog.mjs';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const version = pkg.version;
@@ -93,10 +94,13 @@ try {
 const hash = (file, algo, enc) => createHash(algo).update(readFileSync(file)).digest(enc);
 const setupPath = join('release', setup);
 if (updateUrl) {
+  // As novidades desta versão vão no latest.yml: o app mostra "O que mudou" antes de reiniciar.
+  const entry = loadChangelog(version).find((e) => e.version === version);
+  const notes = (entry?.items ?? []).map((i) => `- ${i.only === 'pc' ? 'PC: ' : i.only === 'android' ? 'Android: ' : ''}${i.text}`).join('\n');
   const sha512 = hash(setupPath, 'sha512', 'base64');
   writeFileSync(
     join('release', 'latest.yml'),
-    `version: ${version}\nfiles:\n  - url: ${setup}\n    sha512: ${sha512}\n    size: ${statSync(setupPath).size}\npath: ${setup}\nsha512: ${sha512}\nreleaseDate: '${new Date().toISOString()}'\n`,
+    `version: ${version}\nfiles:\n  - url: ${setup}\n    sha512: ${sha512}\n    size: ${statSync(setupPath).size}\npath: ${setup}\nsha512: ${sha512}\nreleaseDate: '${new Date().toISOString()}'\nreleaseNotes: ${JSON.stringify(notes)}\n`,
   );
 }
 let sums = '';
