@@ -153,13 +153,14 @@ export class Lobby extends DurableObject<Env> {
         if (!CODE_RE.test(code)) return ws.send(JSON.stringify({ type: "error", message: "invalid code" }));
         const now = Date.now();
         const prev = att.room?.code === code ? att.room : undefined;
-        const members = Array.isArray(msg.members) ? msg.members.slice(0, 16).map((m) => clean(m, 24)).filter(Boolean) : [];
+        const members = Array.isArray(msg.members) ? msg.members.slice(0, 20).map((m) => clean(m, 24)).filter(Boolean) : [];
         const room: Room = {
           code,
           name: clean(msg.name, 40) || `Sala de ${att.user.name}`,
           locked: msg.locked === true,
           host: att.user,
-          count: int(msg.count, 1, 16),
+          count: int(msg.count, 1, 50),
+          max: msg.max === undefined ? 16 : int(msg.max, 2, 50),
           members,
           live: int(msg.live, 0, 16),
           proto: int(msg.proto, 0, 1000),
@@ -321,9 +322,32 @@ export class Lobby extends DurableObject<Env> {
     }
   }
 
+  /** Servidor do Discord dono do webhook (perguntado ao Discord uma vez e guardado). */
+  private async webhookGuild(): Promise<string | null> {
+    const hook = this.webhook();
+    if (!hook) return null;
+    const key = `webhook_guild:${hook.split("/").slice(-2, -1)[0]}`;
+    const cached = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = ?", key).toArray()[0]?.v;
+    if (cached) return cached;
+    try {
+      const res = await fetch(hook);
+      const info = res.ok ? await res.json<{ guild_id?: string }>() : null;
+      const id = typeof info?.guild_id === "string" && /^\d+$/.test(info.guild_id) ? info.guild_id : null;
+      if (id) this.ctx.storage.sql.exec("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", key, id);
+      else console.log("webhook do Discord: não deu para saber o servidor", res.status);
+      return id;
+    } catch (e) {
+      console.log("webhook do Discord: não deu para saber o servidor", String(e));
+      return null;
+    }
+  }
+
   /** Sala nova (ou que voltou dentro do prazo) → avisa no canal; se já estava anunciada, só tira o "sumiu". */
   private async announceOpen(room: Room): Promise<void> {
     if (!this.webhook()) return;
+    // Só avisa salas de quem é membro do servidor onde o webhook foi criado.
+    const guild = await this.webhookGuild();
+    if (!guild || !this.guildsOf(room.host.id).some((g) => g.id === guild)) return;
     const prev = this.ctx.storage.sql.exec<{ message_id: string | null }>("SELECT message_id FROM announced WHERE code = ?", room.code).toArray()[0];
     if (prev) {
       this.ctx.storage.sql.exec("UPDATE announced SET gone_since = NULL, name = ?, host = ? WHERE code = ?", room.name, room.host.name, room.code);

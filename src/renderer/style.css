@@ -388,3 +388,6 @@ body.has-lobby .home-main { align-items: stretch; }
 .online-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .online-where { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .online-item.in-room .online-where { color: var(--ok); }
+/* limite de pessoas ao criar sala */
+.limit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
+.limit-row input { width: 80px; margin: 0; text-align: center; }

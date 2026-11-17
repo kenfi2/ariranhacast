@@ -65,6 +65,9 @@
         <p>Abre uma sala de voz. Lá dentro, cada um decide se só fala, liga a câmera ou transmite a tela.</p>
         <input id="create-name" maxlength="40" placeholder="Nome da sala (opcional)" autocomplete="off" hidden />
         <input id="create-pass" type="password" maxlength="64" placeholder="Senha (opcional)" autocomplete="off" />
+        <label class="limit-row" title="Cada pessoa a mais é uma conexão a mais para todos (P2P). Com câmera ligada, ~0,7 Mbps de upload por pessoa.">Máximo de pessoas
+          <input id="create-limit" type="number" min="2" max="50" step="1" />
+        </label>
         <button id="btn-create" class="primary">Criar sala</button>
       </section>
       <section class="card">
