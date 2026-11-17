@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   gfxGet: () => ipcRenderer.invoke('lc:gfx-get'),
   gfxSet: (cfg: unknown) => ipcRenderer.invoke('lc:gfx-set', cfg),
   relaunch: () => ipcRenderer.invoke('lc:relaunch'),
+  quit: () => ipcRenderer.invoke('lc:quit'),
   openExternal: (url: string) => ipcRenderer.invoke('lc:open-external', url),
   saveClip: (data: ArrayBuffer, ext: string, voice = false) => ipcRenderer.invoke('lc:save-clip', data, ext, voice),
   yellowBorder: () => ipcRenderer.invoke('lc:yellow-border'),

@@ -44,6 +44,7 @@ const ICON = {
   headset: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="13" width="4.5" height="7" rx="1.6"/><rect x="16.5" y="13" width="4.5" height="7" rx="1.6"/>',
   cam: '<rect x="2.5" y="6" width="12.5" height="12" rx="2.5"/><path d="M15 10.5l6.5-3.5v10L15 13.5z"/>',
   screen: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/>',
+  screenStop: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4M9.5 7.8l5 5M14.5 7.8l-5 5"/>',
   chat: '<path d="M4 5.5h16v10.5H10l-4.5 3.5v-3.5H4z"/>',
   vclip: '<rect x="9.5" y="3.5" width="5" height="10" rx="2.5"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3.5"/><circle cx="18.5" cy="5.5" r="2.6" fill="currentColor" stroke="none"/>',
   clip: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/>',
@@ -530,6 +531,10 @@ async function enterRoom(create: boolean, code?: string, password = '', title = 
     if (!window.confirm(`Você está na sala ${here}. Sair dela para ${next}?`)) return;
     leaveRoom();
   }
+  for (const id of ['dlg-join', 'dlg-create']) {
+    const d = $<HTMLDialogElement>(id);
+    if (d.open) d.close();
+  }
   busy = true;
   const my: Attempt = { create, room: null, cancelled: false };
   attempt = my;
@@ -767,6 +772,19 @@ $('create-form').onkeydown = (e) => {
     $('btn-create').click();
   }
 };
+const openJoin = (): void => {
+  if (needsLogin()) return toast('Entre com a sua conta primeiro.');
+  renderRecent();
+  $<HTMLDialogElement>('dlg-join').showModal();
+  $<HTMLInputElement>('join-code').focus();
+};
+$('btn-open-join').onclick = openJoin;
+$('btn-open-join2').onclick = openJoin;
+$('btn-join-close').onclick = () => $<HTMLDialogElement>('dlg-join').close();
+$('btn-recent-clear').onclick = () => {
+  localStorage.removeItem('ariranhacast.recent');
+  renderRecent();
+};
 $<HTMLFormElement>('join-form').onsubmit = (e) => {
   e.preventDefault();
   const code = normalizeCode($<HTMLInputElement>('join-code').value);
@@ -780,7 +798,15 @@ $('btn-copy').onclick = async () => {
 };
 $('room-code').title = 'Clique para copiar o código';
 $('room-code').onclick = () => $('btn-copy').click();
-$('btn-panel').onclick = () => ($('room-side').hidden = !$('room-side').hidden);
+// Painel da sala (voz e sua transmissão): recolhe pelo botão no próprio painel; uma aba na borda reabre.
+const setPanel = (open: boolean): void => {
+  $('room-side').hidden = !open;
+  $('btn-panel-open').hidden = open;
+  localStorage.setItem('ariranhacast.panel', open ? '1' : '0');
+};
+setPanel(localStorage.getItem('ariranhacast.panel') !== '0');
+$('btn-panel').onclick = () => setPanel(false);
+$('btn-panel-open').onclick = () => setPanel(true);
 $('btn-top-back').onclick = () => show('home');
 $('btn-back').onclick = () => show('room');
 
@@ -813,8 +839,9 @@ function updateControls(): void {
   cam.title = camOn ? 'Desligar câmera' : 'Ligar câmera';
 
   const screen = $('btn-screen');
-  setHtml(screen, svg(ICON.screen));
-  screen.classList.toggle('active', !!broadcast);
+  // Transmitindo: o próprio botão vira "parar" (tela com um X), sem botão extra.
+  setHtml(screen, svg(broadcast ? ICON.screenStop : ICON.screen));
+  screen.classList.toggle('stop', !!broadcast);
   screen.title = broadcast ? 'Parar de transmitir' : 'Transmitir tela';
 
   const chatBtn = $('btn-chat');
@@ -940,6 +967,47 @@ function needsLogin(): boolean {
 }
 
 const LOCK_ICON = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
+const ME_ICON = '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.4-3.8 4.2-5.8 7.5-5.8s6.1 2 7.5 5.8"/>';
+
+/** Botão do perfil no topo: a foto da conta (ou um ícone, sem conta). Só refaz quando muda. */
+let meKey = '';
+function renderMe(u: { id: string; name: string; avatar: string | null } | null): void {
+  const key = u ? `${u.id}|${u.name}|${u.avatar ?? ''}` : '';
+  if (key === meKey && $('acc-avatar').dataset.ready) return;
+  meKey = key;
+  const box = u ? avatar(u, 'acc-avatar') : el('span', 'acc-avatar me-icon');
+  if (!u) box.innerHTML = svg(ME_ICON);
+  box.id = 'acc-avatar';
+  box.dataset.ready = '1';
+  $('acc-avatar').replaceWith(box);
+  $('btn-me').title = u ? `${u.name} · conta e configurações` : 'Configurações';
+}
+renderMe(null);
+
+// Menu do perfil: abre/fecha no botão; fecha ao escolher um item, clicar fora ou apertar Esc.
+const meMenu = $('me-menu');
+const setMenu = (open: boolean): void => {
+  meMenu.hidden = !open;
+  $('btn-me').setAttribute('aria-expanded', String(open));
+  $('btn-me').classList.toggle('on', open);
+};
+$('btn-me').onclick = (e) => {
+  e.stopPropagation();
+  setMenu(meMenu.hidden);
+};
+meMenu.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('button')) setMenu(false);
+});
+document.addEventListener('click', (e) => {
+  if (!meMenu.hidden && !meMenu.contains(e.target as Node)) setMenu(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !meMenu.hidden) setMenu(false);
+});
+$('btn-quit').onclick = () => {
+  if (room && !window.confirm('Fechar o AriranhaCast? Você vai sair da sala.')) return;
+  void window.ariranhacast.quit();
+};
 
 function avatar(user: { id: string; name: string; avatar: string | null }, cls: string): HTMLElement {
   const box = el('span', cls);
@@ -1081,17 +1149,17 @@ function renderLobby(): void {
   document.body.classList.toggle('has-lobby', on);
   $('login-card').hidden = !gated;
   $('lobby-card').hidden = !on || gated;
-  $('home-col').hidden = gated;
+  // Com lobby, criar/entrar ficam no topo da lista; o cartão só existe sem servidor de lobby (testes).
+  $('home-col').hidden = gated || on;
   $('create-name-row').hidden = !on;
   $('create-announce-row').hidden = !on;
   $('create-card').hidden = on;
 
   const u = lobbyState.user;
   $('account').hidden = !on || !u;
-  if (u) {
-    $('acc-name').textContent = u.name;
-    $('acc-avatar').replaceWith(Object.assign(avatar(u, 'acc-avatar'), { id: 'acc-avatar' }));
-  }
+  $('btn-logout').hidden = $('logout-sep').hidden = !on || !u;
+  if (u) $('acc-name').textContent = u.name;
+  renderMe(on ? u : null);
 
   if (gated) {
     const box = $('login-providers');
@@ -1108,6 +1176,7 @@ function renderLobby(): void {
       );
     }
     $('login-offline').hidden = lobbyState.providers.length > 0;
+    $('friend-rail').hidden = $('guild-rail').hidden = true;
     return;
   }
   if (!on) return;
@@ -1173,36 +1242,39 @@ function syncPresence(): void {
   void window.ariranhacast.lobbyPresence(code);
 }
 
-/** "Online agora": quem está logado e tem servidor do Discord em comum. Clicar mostra a sala da pessoa. */
+/**
+ * Amigos online agora (quem está logado e tem servidor do Discord em comum), numa barra à direita
+ * como a dos servidores. Sem ninguém online a barra some. Clicar em quem está numa sala mostra só ela.
+ */
 function renderOnline(): void {
   const list = lobbyState.online;
-  const show = lobbyState.guilds.length > 0;
-  $('online-card').hidden = !show;
-  if (!show) return;
-  $('online-count').textContent = list.length ? String(list.length) : '';
-  $('online-empty').hidden = list.length > 0;
-  $('online-list').replaceChildren(
-    ...list.map((o) => {
-      const li = el('li', 'online-item');
-      li.classList.toggle('on', personFilter === o.id);
-      li.classList.toggle('in-room', !!o.room);
-      const av = el('span', 'online-av');
-      av.append(avatar(o, 'lr-avatar'), el('i', 'online-dot'));
-      const text = el('div', 'online-text');
-      const r = o.room ? lobbyState.rooms.find((x) => x.code === o.room) : undefined;
-      const where = o.room ? (room?.code === o.room ? 'na sua sala' : r ? `na sala ${r.name}` : 'numa sala') : 'na tela inicial';
-      const dev = o.devices.includes('android') ? (o.devices.includes('pc') ? ' · PC e celular' : ' · celular') : '';
-      text.append(el('span', 'online-name', o.name), el('span', 'online-where', where + dev));
-      li.append(av, text);
-      li.title = o.room ? 'Clique para ver a sala dessa pessoa' : `${o.name} está na tela inicial`;
-      li.onclick = () => {
-        if (!o.room) return;
-        personFilter = personFilter === o.id ? '' : o.id;
-        if (personFilter) lobbyFilter = '';
-        renderLobby();
-      };
-      return li;
-    }),
+  const rail = $('friend-rail');
+  rail.hidden = !list.length;
+  document.body.classList.toggle('has-friends', list.length > 0);
+  if (!list.length) return;
+  rail.replaceChildren(
+    el('div', 'rail-label', 'Online'),
+    ...[...list]
+      .sort((a, b) => Number(!!b.room) - Number(!!a.room))
+      .map((o) => {
+        const b = el('button', 'rail-item friend');
+        b.type = 'button';
+        b.classList.toggle('on', personFilter === o.id);
+        b.classList.toggle('in-room', !!o.room);
+        const r = o.room ? lobbyState.rooms.find((x) => x.code === o.room) : undefined;
+        const where = o.room ? (room?.code === o.room ? 'na sua sala' : r ? `na sala ${r.name}` : 'numa sala') : 'na tela inicial';
+        const dev = o.devices.includes('android') ? (o.devices.includes('pc') ? ' · PC e celular' : ' · celular') : '';
+        b.title = `${o.name}\n${where}${dev}${o.room ? '\nClique para ver a sala' : ''}`;
+        b.append(avatar(o, 'friend-av'), el('i', 'online-dot'));
+        if (o.room) b.append(el('span', 'friend-live', '●'));
+        b.onclick = () => {
+          if (!o.room) return;
+          personFilter = personFilter === o.id ? '' : o.id;
+          if (personFilter) lobbyFilter = '';
+          renderLobby();
+        };
+        return b;
+      }),
   );
 }
 
@@ -1436,8 +1508,7 @@ function renderTiles(): void {
         };
         st.body.replaceChildren(el('span', 'badge', 'AO VIVO'), el('strong', '', `${p.name} está transmitindo`), btn);
       } else if (mode === 'mine') {
-        st.body.replaceChildren();
-        st.tools.append(toolButton('Parar', stopShare));
+        st.body.replaceChildren(); // parar fica no próprio botão de transmitir
       } else {
         st.body.replaceChildren(el('span', 'status'));
         const vol = el('input');

@@ -34,6 +34,7 @@ export interface AriranhaBridge {
   gfxGet(): Promise<{ current: GfxConfig; saved: GfxConfig }>;
   gfxSet(cfg: GfxConfig): Promise<{ current: GfxConfig; saved: GfxConfig }>;
   relaunch(): Promise<void>;
+  quit(): Promise<void>;
   openExternal(url: string): Promise<boolean>;
   saveClip(data: ArrayBuffer, ext: string, voice?: boolean): Promise<{ ok: boolean; path?: string; error?: string }>;
   showClip(path: string): Promise<void>;

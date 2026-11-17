@@ -666,3 +666,75 @@ label.switch input { appearance: none; -webkit-appearance: none; position: relat
 label.switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
 label.switch input:checked { background: rgba(45, 212, 191, .25); border-color: var(--accent); }
 label.switch input:checked::after { transform: translateX(18px); background: var(--accent); }
+
+/* ---------- 1.0.1: menu do perfil, amigos online, entrar com código, painel e barra da sala ---------- */
+.top-right { position: relative; }
+.me-btn { width: 40px; height: 40px; padding: 0; border-radius: 50%; border: 2px solid transparent; background: transparent; display: grid; place-items: center; }
+.me-btn:hover:not(:disabled), .me-btn.on { border-color: var(--accent); box-shadow: 0 0 16px rgba(45, 212, 191, .3); }
+.me-btn .acc-avatar { width: 32px; height: 32px; font-size: 14px; }
+.acc-avatar.me-icon { background: var(--panel2); color: var(--muted); }
+.acc-avatar.me-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; min-width: 230px; padding: 6px; background: #181c22; border: 1px solid #2b323c; border-radius: 14px; box-shadow: 0 18px 50px rgba(0, 0, 0, .55); display: flex; flex-direction: column; }
+.menu-head { display: flex; flex-direction: column; padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+#acc-name { font-weight: 700; }
+.menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 9px; background: transparent; text-align: left; font-size: 13px; }
+.menu button:hover:not(:disabled) { background: var(--panel2); }
+.menu button svg { width: 17px; height: 17px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.menu .danger-item { color: #ff7a81; }
+.menu .danger-item svg { stroke: currentColor; }
+.menu .danger-item:hover:not(:disabled) { background: rgba(239, 77, 85, .14); }
+.menu-sep { height: 1px; margin: 5px 4px; background: var(--line); }
+
+/* topo da lista: entrar com código ao lado de criar sala */
+.lobby-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.pill-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; background: var(--panel); }
+.pill-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#create-card { gap: 10px; }
+#create-card p { flex: none; }
+
+/* entrar com código */
+dialog#dlg-join { width: 420px; padding: 24px 26px; }
+#dlg-join p { margin: 0 0 14px; font-size: 13px; }
+#dlg-join #join-form { margin-bottom: 10px; }
+#dlg-join #join-code { margin: 0; }
+#dlg-join #join-pass { margin: 0; }
+#dlg-join #recent { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.recent-head { display: flex; align-items: center; justify-content: space-between; }
+.recent-head .label { margin: 0; }
+#recent-list { margin-top: 8px; gap: 6px; }
+#recent-list li { padding: 6px 8px 6px 10px; border-radius: 10px; background: var(--panel2); }
+
+/* amigos online: barra à direita, igual à dos servidores */
+.friend-rail { border-right: 0; border-left: 1px solid #1b1f25; }
+.rail-label { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.rail-item.friend { background: transparent; overflow: visible; }
+.rail-item.friend::before { display: none; }
+.rail-item.friend .friend-av { width: 44px; height: 44px; border-radius: 50%; font-size: 16px; font-weight: 700; color: #fff; display: grid; place-items: center; overflow: hidden; transition: border-radius .15s, box-shadow .15s; }
+.rail-item.friend .friend-av img { width: 100%; height: 100%; object-fit: cover; }
+.rail-item.friend:hover, .rail-item.friend.on { background: transparent; }
+.rail-item.friend:hover .friend-av { border-radius: 14px; }
+.rail-item.friend.on .friend-av { border-radius: 14px; box-shadow: 0 0 0 2px var(--accent), 0 0 16px rgba(45, 212, 191, .45); }
+.rail-item.friend:not(.in-room) { cursor: default; }
+.rail-item.friend .online-dot { right: 0; bottom: 0; width: 12px; height: 12px; border: 3px solid #090b0e; }
+.friend-live { position: absolute; left: -3px; top: -3px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 3px solid #090b0e; font-size: 0; }
+
+/* painel da sala: recolhe pelo próprio painel; a aba na borda reabre */
+.side-head { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 0; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.side-head .icon-btn { width: 30px; height: 30px; margin-right: -6px; }
+.side-head + #voice-box h3:first-child { margin-top: 10px; }
+.panel-tab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 5; width: 22px; height: 64px; padding: 0; border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--panel); color: var(--muted); display: grid; place-items: center; }
+.panel-tab:hover:not(:disabled) { color: var(--accent); background: var(--panel2); }
+.panel-tab svg, .side-head svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* transmitir: o mesmo botão vira "parar" com um X, sem destaque laranja */
+#btn-screen.active { background: #232932; color: var(--text); box-shadow: none; }
+#btn-screen.stop { background: #232932; color: #ff5f68; box-shadow: inset 0 0 0 1px rgba(239, 77, 85, .5); }
+#btn-screen.stop:hover { background: rgba(239, 77, 85, .18); }
+
+/* barra da sala em janelas estreitas: quebra em duas linhas sem cortar */
+#controls { height: auto; min-height: 84px; padding: 8px 20px 12px; }
+@container (max-width: 640px) {
+  #controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; row-gap: 8px; padding: 8px 12px 12px; }
+  .ctl-center { order: -1; flex: 0 1 auto; margin: 0 auto; flex-wrap: wrap; justify-content: center; }
+  .ctl-left, .ctl-right { flex: 1 1 auto; }
+}

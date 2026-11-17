@@ -123,7 +123,7 @@ const SOURCE_ID = /^(screen|window):\d{1,20}:\d{1,10}$/;
 // Janelas de sistema/overlay que o Windows lista como "janela", mas não são algo a transmitir
 // (são transparentes ou ficam pretas na captura).
 const HIDDEN_WINDOWS =
-  /^(?:NVIDIA GeForce Overlay|NVIDIA Overlay|NVIDIA App Overlay|AMD (?:Radeon )?Software(?:: Adrenalin Edition)? Overlay|Radeon Overlay|Xbox Game Bar|Game Bar|Steam Overlay|Program Manager|Microsoft Text Input Application|Windows Input Experience|Experiência de Entrada do Windows|Aplicativo de Entrada de Texto da Microsoft)$/i;
+  /^(?:NVIDIA GeForce Overlay|NVIDIA Overlay|NVIDIA App Overlay|AMD (?:Radeon )?Software(?:: Adrenalin Edition)? Overlay|Radeon Overlay|Xbox Game Bar|Game Bar|Steam Overlay|Program Manager|Microsoft Text Input Application|Windows Input Experience|Experiência de Entrada do Windows|Aplicativo de Entrada de Texto da Microsoft|Nova notificação|New notification|Central de Notificações|Notification Center|Centro de ações|Action center)$/i;
 
 /** Só a nossa própria janela, carregando a nossa própria página, pode usar o IPC. */
 function trusted(e: IpcMainInvokeEvent): boolean {
@@ -1063,6 +1063,11 @@ app.whenReady().then(() => {
   });
 
   handle('lc:platform', () => process.platform);
+  // "Fechar o AriranhaCast" no menu do perfil (mesmo que o item da bandeja).
+  handle('lc:quit', () => {
+    quitting = true;
+    app.quit();
+  });
   handle('lc:version', () => app.getVersion());
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
