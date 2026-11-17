@@ -267,3 +267,43 @@ img.logo { border-radius: 5px; }
 .gate-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
 .gate input[type=range] { padding: 0; margin: 6px 0 0; }
 .gate .muted { margin-top: 6px; }
+
+/* ---------- 0.8.0: conta e salas abertas ---------- */
+.top-right { display: flex; align-items: center; gap: 12px; }
+.account { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.acc-avatar, .lr-avatar { width: 26px; height: 26px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; overflow: hidden; background: var(--panel2); }
+.acc-avatar img, .lr-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.lr-avatar { width: 20px; height: 20px; font-size: 10px; }
+
+.home-col { display: contents; }
+body.has-lobby #view-home { align-items: stretch; }
+body.has-lobby .home-col { display: flex; flex-direction: column; gap: 16px; justify-content: center; }
+body.has-lobby .home-col .card { min-height: 0; }
+body.has-lobby .home-col .card p { flex: none; margin-bottom: 12px; }
+.card input[type=text], #create-name { margin: 0 0 10px; }
+
+.card.login { width: 400px; min-height: 0; align-self: center; text-align: center; align-items: center; }
+.login-logo { width: 64px; height: 64px; margin-bottom: 12px; }
+.card.login p { flex: none; }
+.providers { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-bottom: 12px; }
+.providers button { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 11px 14px; font-weight: 600; }
+.providers button svg { width: 20px; height: 20px; flex: none; }
+.providers .p-discord { background: #5865f2; border-color: #5865f2; color: #fff; }
+.providers .p-discord:hover:not(:disabled) { background: #4752c4; }
+.providers .p-google { background: #fff; border-color: #fff; color: #1f1f1f; }
+.providers .p-google:hover:not(:disabled) { background: #e8eaed; }
+
+.card.lobby { width: 460px; min-height: 0; max-height: calc(100vh - 120px); }
+#lobby-list { list-style: none; margin: 8px 0 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.lobby-room { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; }
+.lobby-room.mine { border-color: var(--accent2); }
+.lr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.lr-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 15px; min-width: 0; }
+.lr-title .lr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lr-title svg { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.lr-live { flex: none; padding: 1px 6px; border-radius: 5px; background: var(--danger); font-size: 10px; font-weight: 700; letter-spacing: .05em; }
+.lr-sub { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
+.lr-sub .lr-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lr-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.lr-actions input { width: 110px; padding: 6px 8px; font-size: 12px; }
+.lobby-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); padding: 32px 12px; border: 1px dashed var(--line); border-radius: 10px; margin-top: 8px; }

@@ -3,3 +3,5 @@ dist/
 release/
 *.log
 mobile/www/
+.wrangler/
+.dev.vars*

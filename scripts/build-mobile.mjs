@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'mobile', 'www');
-const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const version = pkg.version;
+const lobbyUrl = typeof pkg.ariranhacast?.lobbyUrl === 'string' ? pkg.ariranhacast.lobbyUrl : '';
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 await build({
@@ -18,7 +20,7 @@ await build({
   format: 'iife',
   target: 'chrome120',
   loader: { '.wasm': 'binary' },
-  define: { __VERSION__: JSON.stringify(version) },
+  define: { __VERSION__: JSON.stringify(version), __LOBBY_URL__: JSON.stringify(lobbyUrl) },
   // @capacitor/core vem do pacote do app Android
   nodePaths: [join(root, 'mobile', 'node_modules')],
   logLevel: 'info',

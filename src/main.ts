@@ -1,9 +1,10 @@
 import os from 'node:os';
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, session, sharedTexture, shell, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, safeStorage, screen, session, sharedTexture, shell, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { LobbyClient, type PublishedRoom, type Session } from './shared/lobby';
 
 const dev = !app.isPackaged;
 
@@ -535,6 +536,65 @@ function takeDeepLink(code: string): void {
   showWindow();
 }
 
+// ---------- conta e lobby (salas abertas) ----------
+// O servidor do lobby fica em lobby/ (Cloudflare Worker); o endereço vem de "ariranhacast.lobbyUrl"
+// no package.json. A sessão desta conta neste PC fica cifrada pelo Windows (safeStorage/DPAPI).
+function lobbyUrl(): string {
+  const override = arg('lobby'); // só em desenvolvimento: --lc-lobby=http://localhost:8787
+  if (override) return override;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    return typeof pkg?.ariranhacast?.lobbyUrl === 'string' ? pkg.ariranhacast.lobbyUrl : '';
+  } catch {
+    return '';
+  }
+}
+const accountFile = (): string => path.join(app.getPath('userData'), 'conta.bin');
+const lobby = new LobbyClient(
+  lobbyUrl(),
+  {
+    load(): Session | null {
+      try {
+        if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(accountFile())) return null;
+        return JSON.parse(safeStorage.decryptString(fs.readFileSync(accountFile())));
+      } catch (e) {
+        writeLog('error', 'conta', e);
+        return null;
+      }
+    },
+    save(s: Session | null): void {
+      try {
+        if (!s) fs.rmSync(accountFile(), { force: true });
+        else if (safeStorage.isEncryptionAvailable()) fs.writeFileSync(accountFile(), safeStorage.encryptString(JSON.stringify(s)));
+      } catch (e) {
+        writeLog('error', 'conta', e);
+      }
+    },
+  },
+  dev,
+);
+lobby.onchange = (s) => send('lc:lobby', s);
+lobby.onerror = (text) => send('lc:lobby-error', text);
+
+/** Links ariranhacast://auth?… (volta do login no navegador). */
+const authLink = (argv: string[]): string | undefined => argv.find((a) => /^ariranhacast:\/\/auth[/?]/i.test(a));
+
+function cleanPublished(raw: unknown): PublishedRoom | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== 'object' || typeof r.code !== 'string' || !CODE_RE.test(r.code)) return null;
+  const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\p{Cc}\p{Cf}]/gu, '').slice(0, max) : '');
+  const int = (v: unknown, max: number) => (Number.isInteger(v) ? Math.min(max, Math.max(0, v as number)) : 0);
+  return {
+    code: r.code.toUpperCase(),
+    name: text(r.name, 40),
+    locked: r.locked === true,
+    count: Math.max(1, int(r.count, 16)),
+    members: Array.isArray(r.members) ? r.members.slice(0, 16).map((m) => text(m, 24)).filter(Boolean) : [],
+    live: int(r.live, 16),
+    proto: int(r.proto, 1000),
+  };
+}
+
 // ---------- bandeja ----------
 function showWindow(): void {
   if (!win) return;
@@ -919,6 +979,11 @@ if (!profile && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {
+    const auth = authLink(argv);
+    if (auth) {
+      void lobby.completeLogin(auth).then((ok) => ok && showWindow());
+      return;
+    }
     const code = codeFromArgs(argv);
     if (code) takeDeepLink(code);
     else showWindow();
@@ -1061,6 +1126,14 @@ app.whenReady().then(() => {
     overlayCfg = cleanOverlayCfg(cfg);
     updateOverlay();
   });
+  handle('lc:lobby-state', () => lobby.state);
+  handle('lc:lobby-login', (provider: unknown) => {
+    if (typeof provider !== 'string' || !lobby.state.providers.some((p) => p.id === provider)) return false;
+    void shell.openExternal(lobby.loginUrl(provider));
+    return true;
+  });
+  handle('lc:lobby-logout', () => lobby.logout());
+  handle('lc:lobby-publish', (room: unknown) => lobby.publish(room === null ? null : cleanPublished(room)));
   handle('lc:deeplink-pending', () => {
     const c = deepLink;
     deepLink = '';
@@ -1088,6 +1161,7 @@ app.whenReady().then(() => {
   createTray();
   createWindow();
   startUpdater();
+  void lobby.start();
   // Depois da janela aparecer, para o pedido não surgir antes da tela do app.
   win?.webContents.once('did-finish-load', () => setTimeout(() => void ensureFirewall().catch(() => {}), 1500));
 });
@@ -1101,6 +1175,7 @@ app.on('before-quit', () => {
   }
 });
 app.on('will-quit', () => {
+  lobby.stop(); // fecha o WebSocket: a sala que hospedávamos sai da lista na hora
   globalShortcut.unregisterAll();
   stopAudioCap();
   stopGameCap();

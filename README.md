@@ -4,6 +4,13 @@ Sala de voz P2P para um grupo pequeno de amigos, com webcam e transmissão de te
 latência. Mesmo pipeline do Discord: WebRTC (libwebrtc do Chromium) sobre UDP, encoder por
 hardware, bitrate adaptativo.
 
+## Novidades (próxima versão)
+
+- **Conta**: entrar com **Discord** ou **Google** (obrigatório quando o lobby está configurado). O nome e a foto vêm da conta, e a mesma conta fica logada no PC e no celular ao mesmo tempo (no celular aparece "Nome (celular)").
+- **Salas abertas**: a tela inicial lista todas as salas abertas no AriranhaCast, com nome, quem hospeda, quem está, quem está ao vivo e cadeado quando tem senha. Entrar é um clique; o código e os convites continuam funcionando.
+- **Android**: mesmo login (abre o navegador e volta sozinho) e a mesma lista de salas.
+- Servidor do lobby em `lobby/` (Cloudflare Workers, plano grátis): veja `lobby/README.md`.
+
 ## Novidades da 0.6.2
 
 - **Android: configurações** (engrenagem na tela inicial e dentro da sala): supressão de ruído, sensibilidade do microfone com medidor, volume das vozes, sons da sala, qualidade e volume da transmissão, opção de continuar recebendo o vídeo em segundo plano, e um botão que copia um relatório para enviar em caso de problema.
@@ -86,6 +93,7 @@ Todos na sala precisam estar na 0.4.0 (o protocolo mudou).
 | Peça | Implementação |
 |---|---|
 | Sala | código → ID no servidor de sinalização (PeerJS). Só lista de participantes e SDP/ICE passam por ele |
+| Conta e salas abertas | `lobby/` (Cloudflare Worker + Durable Object): login OAuth (Discord/Google), sessão por aparelho e lista de salas por WebSocket. Quem hospeda publica a sala; voz e vídeo nunca passam por ele |
 | Voz | malha: uma conexão Opus direta entre cada par de participantes |
 | Supressão de ruído | Sem supressão · Padrão (WebRTC) · IA (RNNoise em WebAssembly, na thread de áudio) |
 | Webcam | malha: 360p, ~0,7 Mbps por espectador |

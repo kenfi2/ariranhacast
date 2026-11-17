@@ -8,6 +8,7 @@ import { measurePc, type Route } from './link';
 import { describeNetwork, probeNetwork, type NetInfo } from './netcheck';
 import { hasTurn, loadIce, net, normalizeCode } from './signaling';
 import { gameCaptureAvailable, isGameCaptureTrack, startGameCapture, stopGameCapture } from './gamecap';
+import type { LobbyRoom, LobbyState, PublishedRoom } from '../shared/lobby';
 import type { CodecChoice, EncodeOpts, GfxConfig, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
 import { addSticker, listMyEmotes, listStickers } from './library';
@@ -177,6 +178,8 @@ void window.ariranhacast.updaterState().then(renderUpdater);
 
 $('btn-settings').onclick = () => {
   $<HTMLInputElement>('set-name').value = settings.name;
+  $<HTMLInputElement>('set-name').disabled = !!lobbyState.user;
+  $('set-name-note').hidden = !lobbyState.user;
   $<HTMLInputElement>('set-server').value = settings.server;
   $<HTMLTextAreaElement>('set-ice').value = settings.iceServers;
   $<HTMLInputElement>('set-hot-mic').value = settings.hotMic;
@@ -267,7 +270,7 @@ $<HTMLDialogElement>('dlg-settings').addEventListener('close', () => {
     }
   }
   settings = {
-    name: $<HTMLInputElement>('set-name').value.trim() || settings.name,
+    name: lobbyState.user?.name ?? ($<HTMLInputElement>('set-name').value.trim() || settings.name),
     server: $<HTMLInputElement>('set-server').value.trim(),
     iceServers: ice,
     hotMic: $<HTMLInputElement>('set-hot-mic').value,
@@ -433,7 +436,8 @@ function setConnecting(on: boolean, create = false): void {
   const bc = $<HTMLButtonElement>('btn-create');
   const bj = $<HTMLButtonElement>('btn-join');
   bc.disabled = bj.disabled = on;
-  for (const id of ['create-pass', 'join-code', 'join-pass']) $<HTMLInputElement>(id).disabled = on;
+  for (const id of ['create-name', 'create-pass', 'join-code', 'join-pass']) $<HTMLInputElement>(id).disabled = on;
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#lobby-list button')) b.disabled = on;
   bc.textContent = on && create ? 'Criando…' : 'Criar sala';
   bj.textContent = on && !create ? 'Conectando…' : 'Entrar';
   bc.classList.toggle('busy', on && create);
@@ -464,8 +468,9 @@ $('btn-cancel').onclick = () => {
   toast('Conexão cancelada.');
 };
 
-async function enterRoom(create: boolean, code?: string, password = ''): Promise<void> {
+async function enterRoom(create: boolean, code?: string, password = '', title = ''): Promise<void> {
   if (room || busy) return;
+  if (needsLogin()) return toast('Entre com a sua conta primeiro.');
   busy = true;
   const my: Attempt = { create, room: null, cancelled: false };
   attempt = my;
@@ -490,6 +495,7 @@ async function enterRoom(create: boolean, code?: string, password = ''): Promise
   }
   endAttempt(my);
   room = r;
+  roomTitle = title.trim() || lobbyState.rooms.find((x) => x.code === r.code)?.name || '';
   const inRoomNow = (id: string) => r.isMember(id);
   voice = new Voice(r.peer, settings.name, inRoomNow);
   cams = new Cams(r.peer, inRoomNow);
@@ -574,6 +580,8 @@ function leaveRoom(reason?: string): void {
   cams?.close();
   room.leave();
   room = null;
+  roomTitle = '';
+  publishLobby(); // tira a sala da lista (se éramos nós que hospedávamos)
   voice = null;
   cams = null;
   focusKey = '';
@@ -660,7 +668,7 @@ function onRoster(list: RosterEntry[]): void {
   }
 }
 
-$('btn-create').onclick = () => void enterRoom(true, undefined, $<HTMLInputElement>('create-pass').value);
+$('btn-create').onclick = () => void enterRoom(true, undefined, $<HTMLInputElement>('create-pass').value, $<HTMLInputElement>('create-name').value);
 $<HTMLFormElement>('join-form').onsubmit = (e) => {
   e.preventDefault();
   const code = normalizeCode($<HTMLInputElement>('join-code').value);
@@ -809,9 +817,219 @@ function renderRecent(): void {
 }
 renderRecent();
 
+// ---------- conta e salas abertas (lobby) ----------
+// O processo principal mantém a sessão e o WebSocket com o servidor do lobby; aqui só a tela.
+// Com servidor de lobby configurado, entrar com uma conta (Discord, Google…) é obrigatório:
+// o nome e a foto vêm da conta, e a mesma conta pode estar no PC e no celular ao mesmo tempo.
+let lobbyState: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [] };
+let pendingInvite = '';
+let lastProvider = '';
+let roomTitle = ''; // nome da sala atual, como aparece na lista
+let publishedKey = 'null';
+
+/** Testes automáticos rodam sem conta. */
+const lobbyOn = (): boolean => !testing && lobbyState.status !== 'disabled';
+function needsLogin(): boolean {
+  return lobbyOn() && !lobbyState.user;
+}
+
+const LOCK_ICON = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
+
+function avatar(user: { id: string; name: string; avatar: string | null }, cls: string): HTMLElement {
+  const box = el('span', cls);
+  const letter = () => {
+    box.replaceChildren();
+    box.textContent = (user.name.trim()[0] ?? '?').toUpperCase();
+    box.style.background = color(user.id);
+  };
+  if (user.avatar) {
+    const img = el('img');
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.onerror = letter;
+    img.src = user.avatar;
+    box.append(img);
+  } else letter();
+  return box;
+}
+
+/** Quem hospeda a sala publica no lobby nome, senha sim/não, quem está e quem está ao vivo. */
+function publishLobby(): void {
+  if (!lobbyOn()) return;
+  let data: PublishedRoom | null = null;
+  if (room?.isHost && room.code) {
+    data = {
+      code: room.code,
+      name: roomTitle,
+      locked: room.hasPassword,
+      count: Math.max(1, room.roster.length),
+      members: room.roster.map((p) => p.name),
+      live: room.roster.filter((p) => p.screen).length,
+      proto: PROTO,
+    };
+  }
+  const key = JSON.stringify(data);
+  if (key === publishedKey) return;
+  publishedKey = key;
+  void window.ariranhacast.lobbyPublish(data);
+}
+
+function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
+  const li = el('li', 'lobby-room');
+  li.dataset.code = r.code;
+  const main = el('div', 'lr-main');
+  const title = el('div', 'lr-title');
+  const name = el('span', 'lr-name', r.name);
+  name.title = r.name;
+  title.append(name);
+  if (r.locked) title.insertAdjacentHTML('beforeend', `<span title="Sala com senha">${svg(LOCK_ICON)}</span>`);
+  if (r.live) {
+    const live = el('span', 'lr-live', r.live > 1 ? `AO VIVO ×${r.live}` : 'AO VIVO');
+    title.append(live);
+  }
+  const sub = el('div', 'lr-sub');
+  const who = el('span', 'lr-who', `${r.count} ${r.count === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`);
+  who.title = r.members.join('\n');
+  sub.append(avatar(r.host, 'lr-avatar'), who);
+  main.append(title, sub);
+
+  const actions = el('div', 'lr-actions');
+  const join = el('button', 'primary small', 'Entrar');
+  join.type = 'button';
+  let pass: HTMLInputElement | null = null;
+  if (r.proto !== PROTO) {
+    join.disabled = true;
+    join.textContent = 'Outra versão';
+    join.title = r.proto > PROTO ? 'Essa sala usa uma versão mais nova do app. Atualize o AriranhaCast.' : 'Quem hospeda usa uma versão mais antiga do app.';
+  } else {
+    if (r.locked) {
+      pass = el('input');
+      pass.type = 'password';
+      pass.maxLength = 64;
+      pass.placeholder = 'Senha';
+      pass.autocomplete = 'off';
+      pass.onkeydown = (e) => e.key === 'Enter' && join.click();
+      actions.append(pass);
+    }
+    join.onclick = () => {
+      if (pass && !pass.value) {
+        pass.focus();
+        return toast('Essa sala tem senha.');
+      }
+      void enterRoom(false, r.code, pass?.value ?? '', r.name);
+    };
+  }
+  join.disabled ||= busy;
+  actions.append(join);
+  li.append(main, actions);
+  return li;
+}
+
+function renderLobby(): void {
+  const on = lobbyOn();
+  const gated = needsLogin();
+  document.body.classList.toggle('has-lobby', on);
+  $('login-card').hidden = !gated;
+  $('lobby-card').hidden = !on || gated;
+  $('home-col').hidden = gated;
+  $('create-name').hidden = !on;
+
+  const u = lobbyState.user;
+  $('account').hidden = !on || !u;
+  if (u) {
+    $('acc-name').textContent = u.name;
+    $('acc-avatar').replaceWith(Object.assign(avatar(u, 'acc-avatar'), { id: 'acc-avatar' }));
+  }
+
+  if (gated) {
+    const box = $('login-providers');
+    const ids = lobbyState.providers.map((p) => p.id).join(',');
+    if (box.dataset.ids !== ids) {
+      box.dataset.ids = ids;
+      box.replaceChildren(
+        ...lobbyState.providers.map((p) => {
+          const b = el('button', `p-${p.id}`, `Entrar com ${p.label}`);
+          b.type = 'button';
+          b.onclick = () => startLogin(p.id);
+          return b;
+        }),
+      );
+    }
+    $('login-offline').hidden = lobbyState.providers.length > 0;
+    return;
+  }
+  if (!on) return;
+
+  const st = lobbyState.status;
+  const n = lobbyState.rooms.length;
+  $('lobby-status').textContent = st === 'online' ? (n === 1 ? '1 sala' : `${n} salas`) : st === 'offline' ? 'sem conexão, tentando de novo…' : 'conectando…';
+  $('lobby-empty').hidden = st !== 'online' || n > 0;
+  // A lista é refeita a cada mudança: guarda a senha que a pessoa estava digitando (e o foco).
+  const typed = new Map<string, string>();
+  let focused = '';
+  for (const input of document.querySelectorAll<HTMLInputElement>('#lobby-list input')) {
+    const code = input.closest<HTMLElement>('li')?.dataset.code ?? '';
+    if (input.value) typed.set(code, input.value);
+    if (document.activeElement === input) focused = code;
+  }
+  $('lobby-list').replaceChildren(...lobbyState.rooms.map(lobbyRoomItem));
+  for (const li of document.querySelectorAll<HTMLElement>('#lobby-list li')) {
+    const input = li.querySelector('input');
+    const code = li.dataset.code ?? '';
+    if (!input) continue;
+    input.value = typed.get(code) ?? '';
+    if (focused === code) input.focus();
+  }
+}
+
+function startLogin(provider: string): void {
+  lastProvider = provider;
+  void window.ariranhacast.lobbyLogin(provider).then((ok) => {
+    if (!ok) return toast('Não foi possível abrir o login. Tente de novo.');
+    $('login-wait').hidden = false;
+  });
+}
+$('btn-login-again').onclick = () => lastProvider && startLogin(lastProvider);
+$('btn-logout').onclick = () => {
+  if (room) return toast('Saia da sala antes de sair da conta.');
+  void window.ariranhacast.lobbyLogout();
+};
+
+// Até saber se precisa de login, a tela inicial fica escondida (evita piscar a tela antiga).
+$('view-home').style.visibility = 'hidden';
+const revealHome = (): void => void ($('view-home').style.visibility = '');
+window.setTimeout(revealHome, 1500);
+
+function onLobby(s: LobbyState): void {
+  revealHome();
+  const hadUser = !!lobbyState.user;
+  lobbyState = s;
+  if (s.user && settings.name !== s.user.name) {
+    settings = { ...settings, name: s.user.name };
+    localStorage.setItem('ariranhacast.settings', JSON.stringify(settings));
+  }
+  if (s.status === 'online') publishedKey = 'null'; // reconectou: o principal já republica o que hospedamos
+  renderLobby();
+  if (!hadUser && s.user) {
+    $('login-wait').hidden = true;
+    if (pendingInvite) {
+      const code = pendingInvite;
+      pendingInvite = '';
+      openInvite(code);
+    }
+  }
+}
+window.ariranhacast.onLobby(onLobby);
+window.ariranhacast.onLobbyError((text) => toast(text));
+void window.ariranhacast.lobbyState().then(onLobby);
+
 function openInvite(code: string): void {
   code = normalizeCode(code);
   if (code.length < 4) return;
+  if (needsLogin()) {
+    pendingInvite = code;
+    return toast('Entre com a sua conta para abrir o convite.');
+  }
   if (room) return toast(room.code === code ? 'Você já está nessa sala.' : `Convite para a sala ${code}: saia da sala atual para entrar.`);
   $<HTMLInputElement>('join-code').value = code;
   void enterRoom(false, code, $<HTMLInputElement>('join-pass').value);
@@ -1673,6 +1891,7 @@ $('btn-report').onclick = async () => {
 
 async function poll(): Promise<void> {
   pollCount++;
+  publishLobby();
   // Retoma transmissões que o usuário estava assistindo e caíram (rede que piscou, troca de quem hospeda).
   if (room) {
     for (const [id, last] of wantWatch) {

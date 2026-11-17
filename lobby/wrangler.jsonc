@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ariranhacast-lobby",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+
+  "durable_objects": {
+    "bindings": [{ "name": "LOBBY", "class_name": "Lobby" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lobby"] }],
+
+  // Client IDs não são segredos. Deixe vazio o provedor que não for usar.
+  // Os segredos vão com: npx wrangler secret put DISCORD_CLIENT_SECRET (e GOOGLE_CLIENT_SECRET)
+  "vars": {
+    "DISCORD_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": ""
+  }
+}

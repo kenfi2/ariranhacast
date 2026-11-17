@@ -9,6 +9,9 @@ interface CallPlugin {
   keepScreenOn(o: { on: boolean }): Promise<void>;
   fullscreen(o: { on: boolean }): Promise<void>;
   addListener(event: 'fullscreenExit', cb: () => void): Promise<{ remove(): Promise<void> }>;
+  addListener(event: 'appLink', cb: (e: { url: string }) => void): Promise<{ remove(): Promise<void> }>;
+  openUrl(o: { url: string }): Promise<void>;
+  takeLaunchLink(): Promise<{ url?: string }>;
 }
 
 const Call = registerPlugin<CallPlugin>('Call');
@@ -54,4 +57,22 @@ export function setFullscreen(on: boolean): void {
 /** O botão voltar do Android, com o vídeo em tela cheia, sai da tela cheia (em vez de sair do app). */
 export function onFullscreenExit(cb: () => void): void {
   if (native) void Call.addListener('fullscreenExit', cb).catch(() => {});
+}
+
+/** Abre uma URL https no navegador do sistema (login). */
+export async function openBrowser(url: string): Promise<boolean> {
+  if (!native) return !!window.open(url, '_blank');
+  return Call.openUrl({ url }).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Links ariranhacast:// (volta do login, convites): o que abriu o app e os que chegam com ele aberto. */
+export function onAppLink(cb: (url: string) => void): void {
+  if (!native) return;
+  void Call.addListener('appLink', (e) => typeof e?.url === 'string' && cb(e.url)).catch(() => {});
+  void Call.takeLaunchLink()
+    .then((r) => r.url && cb(r.url))
+    .catch(() => {});
 }
