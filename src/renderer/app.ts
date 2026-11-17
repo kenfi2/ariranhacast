@@ -734,7 +734,32 @@ function onRoster(list: RosterEntry[]): void {
   }
 }
 
-$('btn-create').onclick = () => void enterRoom(true, undefined, $<HTMLInputElement>('create-pass').value, $<HTMLInputElement>('create-name').value);
+// Criar sala: diálogo com nome, limite (+/−), senha e onde a sala roda (servidor próprio: em breve).
+const openCreate = (): void => {
+  if (needsLogin()) return toast('Entre com a sua conta primeiro.');
+  $<HTMLInputElement>('create-limit').value = String(savedLimit());
+  $<HTMLDialogElement>('dlg-create').showModal();
+  $<HTMLInputElement>($('create-name-row').hidden ? 'create-pass' : 'create-name').focus();
+};
+$('btn-open-create').onclick = openCreate;
+$('btn-open-create2').onclick = openCreate;
+const stepLimit = (d: number): void => {
+  const input = $<HTMLInputElement>('create-limit');
+  input.value = String(clampLimit(Math.round(Number(input.value) || DEFAULT_LIMIT) + d));
+};
+$('limit-dec').onclick = () => stepLimit(-1);
+$('limit-inc').onclick = () => stepLimit(1);
+$('create-limit').onchange = () => stepLimit(0);
+$('btn-create').onclick = () => {
+  $<HTMLDialogElement>('dlg-create').close();
+  void enterRoom(true, undefined, $<HTMLInputElement>('create-pass').value, $<HTMLInputElement>('create-name').value);
+};
+$('create-form').onkeydown = (e) => {
+  if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+    e.preventDefault();
+    $('btn-create').click();
+  }
+};
 $<HTMLFormElement>('join-form').onsubmit = (e) => {
   e.preventDefault();
   const code = normalizeCode($<HTMLInputElement>('join-code').value);
@@ -893,6 +918,8 @@ let lobbyState: LobbyState = { status: 'disabled', user: null, rooms: [], provid
 let personFilter = ''; // id de alguém do "Online agora": mostra só a sala em que a pessoa está
 let sentPresence: string | null | undefined;
 let lobbyFilter = ''; // id de um servidor do Discord, ou '' = todas as salas
+let lobbyMine = false; // só salas de quem está em algum servidor do Discord seu
+let lobbySearch = ''; // texto da busca na lista de salas
 let pendingInvite = '';
 let lastProvider = '';
 let roomTitle = ''; // nome da sala atual, como aparece na lista
@@ -949,21 +976,33 @@ function publishLobby(): void {
 function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   const li = el('li', 'lobby-room');
   li.dataset.code = r.code;
+  li.classList.toggle('live', r.live > 0);
+  // Faixa de cima do cartão: AO VIVO, senha, cheia.
+  const cover = el('div', 'lr-cover');
+  const badges = el('div', 'lr-badges');
+  if (r.live) badges.append(el('span', 'lr-live', r.live > 1 ? `AO VIVO ×${r.live}` : 'AO VIVO'));
+  if (r.count >= r.max) badges.append(el('span', 'lr-full', 'Cheia'));
+  if (r.locked) badges.insertAdjacentHTML('beforeend', `<span class="lr-lock" title="Sala com senha">${svg(LOCK_ICON)}</span>`);
+  cover.append(badges);
+
   const main = el('div', 'lr-main');
   const title = el('div', 'lr-title');
   const name = el('span', 'lr-name', r.name);
   name.title = r.name;
-  title.append(name);
-  if (r.locked) title.insertAdjacentHTML('beforeend', `<span title="Sala com senha">${svg(LOCK_ICON)}</span>`);
-  if (r.live) {
-    const live = el('span', 'lr-live', r.live > 1 ? `AO VIVO ×${r.live}` : 'AO VIVO');
-    title.append(live);
-  }
+  title.append(name, el('span', 'lr-count', `${r.count}/${r.max}`));
   const sub = el('div', 'lr-sub');
-  const who = el('span', 'lr-who', `${r.count}/${r.max} ${r.max === 1 ? 'pessoa' : 'pessoas'} · ${r.members.join(', ') || r.host.name}`);
-  who.title = r.members.join('\n');
-  sub.append(avatar(r.host, 'lr-avatar'), who);
-  main.append(title, sub);
+  sub.append(avatar(r.host, 'lr-avatar'), el('span', 'lr-who', r.host.name));
+  // Quem está na sala: bolinhas com a inicial (até 6) + quantos faltam.
+  const people = el('div', 'lr-people');
+  people.title = r.members.join('\n');
+  const names = r.members.length ? r.members : [r.host.name];
+  for (const n of names.slice(0, 6)) {
+    const b = el('span', 'lr-dot', (n.trim()[0] ?? '?').toUpperCase());
+    b.style.background = color(n);
+    people.append(b);
+  }
+  if (names.length > 6) people.append(el('span', 'lr-dot more', `+${names.length - 6}`));
+  main.append(title, sub, people);
   // Servidores do Discord em comum com quem hospeda.
   const shared = r.guilds.map((id) => lobbyState.guilds.find((g) => g.id === id)).filter((g): g is NonNullable<typeof g> => !!g);
   if (shared.length) {
@@ -991,6 +1030,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   let pass: HTMLInputElement | null = null;
   if (room?.code === r.code) {
     li.classList.add('mine');
+    badges.append(el('span', 'lr-here', 'Você está aqui'));
     join.textContent = 'Voltar';
     join.title = 'Você está nesta sala';
     join.onclick = () => show('room');
@@ -1022,7 +1062,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   }
   join.disabled ||= busy;
   actions.append(join);
-  li.append(main, actions);
+  li.append(cover, main, actions);
   return li;
 }
 
@@ -1033,7 +1073,8 @@ function renderLobby(): void {
   $('login-card').hidden = !gated;
   $('lobby-card').hidden = !on || gated;
   $('home-col').hidden = gated;
-  $('create-name').hidden = !on;
+  $('create-name-row').hidden = !on;
+  $('create-card').hidden = on;
 
   const u = lobbyState.user;
   $('account').hidden = !on || !u;
@@ -1067,8 +1108,15 @@ function renderLobby(): void {
   const person = lobbyState.online.find((o) => o.id === personFilter);
   if (personFilter && !person?.room) personFilter = '';
   if (person?.room) $('lobby-scope').textContent = ` · com ${person.name}`;
+  // "Dos meus servidores" só faz sentido com servidores do Discord; a busca olha nome da sala e de quem está nela.
+  $('lobby-chips').hidden = !lobbyState.guilds.length;
+  if (!lobbyState.guilds.length) lobbyMine = false;
+  for (const c of document.querySelectorAll<HTMLElement>('#lobby-chips .chip')) c.classList.toggle('on', (c.dataset.scope === 'mine') === lobbyMine);
+  const q = lobbySearch.trim().toLocaleLowerCase('pt-BR');
+  const matches = (r: LobbyRoom) => !q || [r.name, r.host.name, ...r.members].some((t) => t.toLocaleLowerCase('pt-BR').includes(q));
   const rooms = lobbyState.rooms
-    .filter((r) => (person?.room ? r.code === person.room : !lobbyFilter || r.guilds.includes(lobbyFilter)))
+    .filter((r) => (person?.room ? r.code === person.room : (!lobbyFilter || r.guilds.includes(lobbyFilter)) && (!lobbyMine || r.guilds.length > 0)))
+    .filter(matches)
     .map((r, i) => ({ r, i }))
     .sort((a, b) => Number(b.r.guilds.length > 0) - Number(a.r.guilds.length > 0) || a.i - b.i)
     .map((x) => x.r);
@@ -1077,6 +1125,9 @@ function renderLobby(): void {
   const n = rooms.length;
   $('lobby-status').textContent = st === 'online' ? (n === 1 ? '1 sala' : `${n} salas`) : st === 'offline' ? 'sem conexão, tentando de novo…' : 'conectando…';
   $('lobby-empty').hidden = st !== 'online' || n > 0;
+  $('lobby-empty').innerHTML = q || lobbyMine || lobbyFilter
+    ? 'Nenhuma sala encontrada com esse filtro.'
+    : 'Nenhuma sala aberta agora.<br />Crie uma e ela aparece aqui para todo mundo.';
   $('lobby-list').hidden = n === 0;
   // A lista é refeita a cada mudança: guarda a senha que a pessoa estava digitando (e o foco).
   const typed = new Map<string, string>();
@@ -1206,6 +1257,16 @@ function renderGuildRail(): void {
   $('lobby-scope').textContent = lobbyFilter ? ` · ${guilds.find((g) => g.id === lobbyFilter)?.name ?? ''}` : '';
 }
 $('btn-login-again').onclick = () => lastProvider && startLogin(lastProvider);
+$<HTMLInputElement>('lobby-search').oninput = (e) => {
+  lobbySearch = (e.target as HTMLInputElement).value;
+  renderLobby();
+};
+for (const c of document.querySelectorAll<HTMLButtonElement>('#lobby-chips .chip')) {
+  c.onclick = () => {
+    lobbyMine = c.dataset.scope === 'mine';
+    renderLobby();
+  };
+}
 $('btn-logout').onclick = () => {
   if (room) return toast('Saia da sala antes de sair da conta.');
   void window.ariranhacast.lobbyLogout();
@@ -1444,6 +1505,8 @@ function renderTiles(): void {
 function applyFocus(): void {
   if (focusKey && !tiles.has(focusKey)) focusKey = '';
   $('stage').classList.toggle('focused', !!focusKey);
+  // Ao vivo em destaque: os outros cartões viram uma coluna à direita (mesmo visual da chamada).
+  $('stage').style.setProperty('--n', String(Math.max(1, tiles.size - 1)));
   for (const [key, tile] of tiles) tile.root.classList.toggle('focus', key === focusKey);
 }
 
@@ -1567,6 +1630,13 @@ function openShare(isSwitch: boolean): void {
 }
 
 $('btn-refresh').onclick = () => void refreshSources();
+for (const b of document.querySelectorAll<HTMLButtonElement>('.share-tabs button')) {
+  b.onclick = () => {
+    for (const x of document.querySelectorAll('.share-tabs button')) x.classList.toggle('on', x === b);
+    $('grid-screens').hidden = b.dataset.src !== 'screen';
+    $('pane-windows').hidden = b.dataset.src !== 'window';
+  };
+}
 {
   const box = $<HTMLInputElement>('opt-gamecap');
   box.checked = localStorage.getItem('ariranhacast.gamecap') === '1';
