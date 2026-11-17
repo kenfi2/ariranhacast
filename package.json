@@ -25,7 +25,7 @@
   },
   "ariranhacast": {
     "updateUrl": "https://github.com/kenfi2/ariranhacast/releases/latest/download/",
-    "lobbyUrl": ""
+    "lobbyUrl": "https://ariranhacast-lobby.kenfi.workers.dev"
   },
   "author": "AriranhaCast"
 }
