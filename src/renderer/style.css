@@ -338,3 +338,13 @@ body.has-lobby .home-col { justify-content: safe center; }
   button.round svg { width: 19px; height: 19px; }
   .ctl-center { gap: 6px; }
 }
+
+/* ---------- servidores do Discord em comum ---------- */
+.lobby-head-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.lobby-filter { width: auto; max-width: 190px; padding: 4px 8px; font-size: 12px; }
+.lr-guilds { display: flex; align-items: center; gap: 6px; margin-top: 2px; min-width: 0; }
+.guild-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 1px 8px 1px 2px; border-radius: 99px; background: rgba(88, 101, 242, .18); color: #c9cdfb; font-size: 11px; font-weight: 600; min-width: 0; }
+.guild-chip:not(:has(img)) { padding-left: 8px; }
+.guild-chip img { width: 16px; height: 16px; border-radius: 50%; flex: none; }
+.guild-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guild-more { font-size: 11px; color: var(--muted); }

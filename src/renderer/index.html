@@ -48,7 +48,10 @@
       <section id="lobby-card" class="card lobby" hidden>
         <div class="row between">
           <h2>Salas abertas</h2>
-          <span id="lobby-status" class="muted"></span>
+          <div class="lobby-head-right">
+            <select id="lobby-filter" class="lobby-filter" title="Mostrar só as salas de quem está num servidor do Discord seu" hidden></select>
+            <span id="lobby-status" class="muted"></span>
+          </div>
         </div>
         <ul id="lobby-list"></ul>
         <div id="lobby-empty" class="lobby-empty" hidden>Nenhuma sala aberta agora.<br />Crie uma e ela aparece aqui para todo mundo.</div>

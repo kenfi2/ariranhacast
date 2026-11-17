@@ -27,6 +27,8 @@ npx wrangler deploy    # no final mostra o endereço: https://ariranhacast-lobby
    npx wrangler secret put DISCORD_CLIENT_SECRET
    ```
 
+Com o Discord, o app também lê **a lista de servidores** da pessoa (escopo `guilds`, liberado sem aprovação). Ela fica só no servidor do lobby e serve para mostrar primeiro as salas de quem está num servidor em comum, com o nome do servidor e um filtro. Ninguém vê a lista de servidores de outra pessoa: cada um só vê os servidores **em comum**. Quem já estava logado antes desta versão precisa sair e entrar de novo uma vez.
+
 ## 3. Login com Google (opcional)
 
 1. https://console.cloud.google.com → crie um projeto → **APIs e serviços → Tela de consentimento OAuth**: tipo **Externo**, nome "AriranhaCast", escopos `openid` e `profile` (não precisam de verificação). Publique o app (senão só contas de teste entram).
@@ -38,6 +40,20 @@ npx wrangler deploy    # no final mostra o endereço: https://ariranhacast-lobby
    ```
 
 Depois de mudar o `wrangler.jsonc`, rode `npx wrangler deploy` de novo. Só aparecem no app os provedores com ID e segredo configurados. Para outro provedor (GitHub, Twitch…), acrescente uma entrada em `src/providers.ts`.
+
+## 3b. Avisos num canal do Discord (opcional)
+
+Quando alguém abre uma sala, o lobby posta no canal: "🟢 **Mathias** abriu a sala **aoba** 🔒" com um link que abre o app direto na sala. Quando a sala fecha (e fica fechada por 1 minuto), a mensagem vira "⚫ ~~Sala aoba de Mathias~~ encerrada". Nada de @everyone: o aviso nunca menciona ninguém.
+
+1. No Discord, no canal desejado: **Editar canal → Integrações → Webhooks → Novo webhook** → **Copiar URL do webhook**.
+2. Na pasta `lobby/`:
+   ```powershell
+   npx wrangler secret put DISCORD_WEBHOOK_URL
+   ```
+   e cole a URL. A URL do webhook funciona como uma senha (quem tem pode postar no canal): não coloque em arquivo nenhum.
+3. Opcional: em `wrangler.jsonc`, `"DOWNLOAD_URL"` muda o link "Ainda não tenho o app" da página de convite (padrão: a última release no GitHub).
+
+O link do aviso é `https://<lobby>/entrar/CODIGO`: uma página que abre `ariranhacast://entrar/CODIGO` (o Discord não deixa clicar em links `ariranhacast://`). Serve também para mandar convite em qualquer chat.
 
 ## 4. Ligar no app
 
@@ -78,6 +94,7 @@ cd .. && npm run build && npx electron . --lc-lobby=http://localhost:8787   # ap
 | `GET /me` | dados da conta (`Authorization: Bearer <token>`) |
 | `POST /auth/logout` | encerra a sessão deste aparelho |
 | `GET /lobby` (WebSocket, subprotocolos `ariranhacast`, `<token>`) | lista de salas ao vivo |
+| `GET /entrar/CODIGO` | página que abre o app na sala (links de convite e avisos no Discord) |
 
 Mensagens do WebSocket: o servidor manda `{type:"welcome", user, rooms}` e `{type:"rooms", rooms}`; o app manda `{type:"set_room", code, name, locked, count, members, live, proto}`, `{type:"close_room"}` e `"ping"` (responde `"pong"` sem gastar cota).
 

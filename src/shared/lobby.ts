@@ -24,6 +24,15 @@ export interface LobbyRoom {
   live: number;
   proto: number;
   createdAt: number;
+  /** Servidores do Discord em comum entre você e quem hospeda (ids; nomes em LobbyState.guilds). */
+  guilds: string[];
+}
+
+/** Um servidor do Discord da sua conta. */
+export interface LobbyGuild {
+  id: string;
+  name: string;
+  icon: string | null;
 }
 
 export interface LobbyProvider {
@@ -54,6 +63,8 @@ export interface LobbyState {
   user: LobbyUser | null;
   rooms: LobbyRoom[];
   providers: LobbyProvider[];
+  /** Seus servidores do Discord (vazio para contas Google ou antes de logar de novo). */
+  guilds: LobbyGuild[];
 }
 
 export interface Session {
@@ -105,7 +116,22 @@ function cleanRoom(raw: unknown): LobbyRoom | null {
     live: int(r?.live, 0, 16),
     proto: int(r?.proto, 0, 1000),
     createdAt: Number.isFinite(r?.createdAt) ? Number(r!.createdAt) : 0,
+    guilds: Array.isArray(r?.guilds) ? (r.guilds as unknown[]).slice(0, 10).filter((g): g is string => typeof g === 'string' && /^\d{5,25}$/.test(g)) : [],
   };
+}
+
+function cleanGuild(raw: unknown): LobbyGuild | null {
+  const g = raw as Record<string, unknown> | null;
+  const id = str(g?.id, 25);
+  if (!/^\d{5,25}$/.test(id)) return null;
+  let icon: string | null = null;
+  try {
+    const u = new URL(String(g?.icon));
+    if (u.protocol === 'https:' && u.hostname === 'cdn.discordapp.com') icon = u.toString();
+  } catch {
+    /* sem ícone */
+  }
+  return { id, name: str(g?.name, 60) || 'Servidor', icon };
 }
 
 function randomState(): string {
@@ -113,7 +139,7 @@ function randomState(): string {
 }
 
 export class LobbyClient {
-  state: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [] };
+  state: LobbyState = { status: 'disabled', user: null, rooms: [], providers: [], guilds: [] };
   onchange: (s: LobbyState) => void = () => {};
   onerror: (text: string) => void = () => {};
 
@@ -152,7 +178,7 @@ export class LobbyClient {
     } catch {
       this.session = null;
     }
-    if (!this.session) return this.set({ status: 'logged-out', user: null, rooms: [] });
+    if (!this.session) return this.set({ status: 'logged-out', user: null, rooms: [], guilds: [] });
     this.set({ user: this.session.user });
     await this.connect();
   }
@@ -203,7 +229,7 @@ export class LobbyClient {
     this.hosting = null;
     this.cleanup();
     await this.store.save(null);
-    this.set({ status: 'logged-out', user: null, rooms: [] });
+    this.set({ status: 'logged-out', user: null, rooms: [], guilds: [] });
     if (token) {
       await fetch(`${this.baseUrl}/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
     }
@@ -259,7 +285,7 @@ export class LobbyClient {
         this.session = null;
         await this.store.save(null);
         this.onerror('Sua sessão expirou. Entre de novo.');
-        return this.set({ status: 'logged-out', user: null, rooms: [] });
+        return this.set({ status: 'logged-out', user: null, rooms: [], guilds: [] });
       }
       if (me && JSON.stringify(me) !== JSON.stringify(session.user)) {
         session.user = me;
@@ -289,7 +315,10 @@ export class LobbyClient {
       }
       if (msg?.type === 'welcome' || msg?.type === 'rooms') {
         const rooms = Array.isArray(msg.rooms) ? (msg.rooms as unknown[]).slice(0, 200).map(cleanRoom).filter((r): r is LobbyRoom => !!r) : [];
-        this.set({ rooms });
+        if (msg.type === 'welcome' && Array.isArray(msg.guilds)) {
+          const guilds = (msg.guilds as unknown[]).slice(0, 250).map(cleanGuild).filter((g): g is LobbyGuild => !!g);
+          this.set({ rooms, guilds });
+        } else this.set({ rooms });
       }
     };
     ws.onclose = () => {

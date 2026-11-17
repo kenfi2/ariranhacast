@@ -1,4 +1,4 @@
-import type { Env, User } from "./types";
+import type { Env, Guild, User } from "./types";
 
 /** Provedores de login (OAuth2). Para incluir outro, basta acrescentar uma entrada aqui. */
 export interface Provider {
@@ -12,6 +12,8 @@ export interface Provider {
   clientId(env: Env): string | undefined;
   clientSecret(env: Env): string | undefined;
   toUser(raw: any): Omit<User, "provider"> | null;
+  /** Grupos do usuário no provedor (Discord: servidores). Opcional. */
+  groups?(accessToken: string): Promise<Guild[]>;
 }
 
 const str = (v: unknown, max: number) =>
@@ -33,7 +35,7 @@ export const PROVIDERS: Provider[] = [
     authorize: "https://discord.com/oauth2/authorize",
     token: "https://discord.com/api/oauth2/token",
     userinfo: "https://discord.com/api/v10/users/@me",
-    scope: "identify",
+    scope: "identify guilds",
     clientId: (env) => env.DISCORD_CLIENT_ID,
     clientSecret: (env) => env.DISCORD_CLIENT_SECRET,
     toUser: (u) => {
@@ -41,6 +43,20 @@ export const PROVIDERS: Provider[] = [
       if (!/^\d{5,25}$/.test(id)) return null;
       const avatar = /^(a_)?[0-9a-f]{32}$/.test(String(u?.avatar)) ? `https://cdn.discordapp.com/avatars/${id}/${u.avatar}.png?size=128` : null;
       return { id, name: str(u?.global_name, 24) || str(u?.username, 24) || "Usuário", avatar };
+    },
+    groups: async (accessToken) => {
+      const res = await fetch("https://discord.com/api/v10/users/@me/guilds", {
+        headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": "AriranhaCast-Lobby (https://github.com/kenfi2/ariranhacast, 1.0)" },
+      });
+      if (!res.ok) throw new Error(`guilds HTTP ${res.status}`);
+      const list = (await res.json()) as unknown;
+      if (!Array.isArray(list)) return [];
+      return list.slice(0, 250).flatMap((g): Guild[] => {
+        const id = str(g?.id, 25);
+        if (!/^\d{5,25}$/.test(id)) return [];
+        const icon = /^(a_)?[0-9a-f]{32}$/.test(String(g?.icon)) ? `https://cdn.discordapp.com/icons/${id}/${g.icon}.png?size=64` : null;
+        return [{ id, name: str(g?.name, 60) || "Servidor", icon }];
+      });
     },
   },
   {

@@ -1,11 +1,18 @@
 import { DurableObject } from "cloudflare:workers";
-import type { Env, Room, User } from "./types";
+import type { Env, Guild, Room, User } from "./types";
 
 type Attachment = { user: User; room?: Room };
 
 const SESSION_TTL_MS = 60 * 24 * 3600_000; // 60 dias sem precisar logar de novo
 const MAX_MESSAGE = 4096;
 const CODE_RE = /^[A-Z0-9]{4,16}$/;
+/** Quanto tempo uma sala pode sumir da lista (troca de quem hospeda, rede piscando) antes do aviso "encerrada". */
+const CLOSE_GRACE_MS = 60_000;
+
+/** Texto seguro para mensagem do Discord: sem markdown, menções ou links. */
+function discordText(s: string): string {
+  return s.replace(/[\\*_~`|>#\[\]()@:<]/g, (c) => `\\${c}`).replace(/https?\/\//gi, "");
+}
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -36,6 +43,20 @@ export class Lobby extends DurableObject<Env> {
       user       TEXT NOT NULL,
       expires    INTEGER NOT NULL
     )`);
+    // Servidores do Discord de cada conta (atualizados a cada login).
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS accounts(
+      user_id TEXT PRIMARY KEY,
+      guilds  TEXT NOT NULL
+    )`);
+    // Salas anunciadas no canal do Discord (webhook): para marcar como encerradas depois.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS announced(
+      code       TEXT PRIMARY KEY,
+      message_id TEXT,
+      name       TEXT NOT NULL,
+      host       TEXT NOT NULL,
+      gone_since INTEGER
+    )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
     // "ping" → "pong" sem acordar o objeto (keep-alive grátis).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -61,6 +82,22 @@ export class Lobby extends DurableObject<Env> {
     return row ? (JSON.parse(row.user) as User) : null;
   }
 
+  async saveGuilds(userId: string, guilds: Guild[]): Promise<void> {
+    this.ctx.storage.sql.exec(
+      "INSERT INTO accounts(user_id, guilds) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET guilds = excluded.guilds",
+      userId, JSON.stringify(guilds.slice(0, 250)),
+    );
+  }
+
+  private guildsOf(userId: string): Guild[] {
+    const row = this.ctx.storage.sql.exec<{ guilds: string }>("SELECT guilds FROM accounts WHERE user_id = ?", userId).toArray()[0];
+    try {
+      return row ? (JSON.parse(row.guilds) as Guild[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
   async deleteSession(token: string): Promise<void> {
     if (!/^[0-9a-f]{64}$/.test(token)) return;
     this.ctx.storage.sql.exec("DELETE FROM sessions WHERE token_hash = ?", await sha256(token));
@@ -77,10 +114,14 @@ export class Lobby extends DurableObject<Env> {
     const user = await this.getSession(token);
     if (!user) return new Response("unauthorized", { status: 401 });
 
+    // Endereço público do lobby, para os links dos avisos no Discord.
+    this.ctx.storage.sql.exec("INSERT OR REPLACE INTO meta(k, v) VALUES ('origin', ?)", new URL(req.url).origin);
+
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ user } satisfies Attachment);
-    server.send(JSON.stringify({ type: "welcome", user, rooms: this.rooms() }));
+    const guilds = this.guildsOf(user.id);
+    server.send(JSON.stringify({ type: "welcome", user, guilds, rooms: this.roomsFor(user, this.rooms(), new Map()) }));
 
     return new Response(null, {
       status: 101,
@@ -126,6 +167,7 @@ export class Lobby extends DurableObject<Env> {
         const changed = !prev || JSON.stringify({ ...prev, updatedAt: 0 }) !== JSON.stringify({ ...room, updatedAt: 0 });
         ws.serializeAttachment({ user: att.user, room } satisfies Attachment);
         if (changed) this.broadcastRooms();
+        if (!prev) await this.announceOpen(room);
         break;
       }
       case "close_room": {
@@ -168,15 +210,119 @@ export class Lobby extends DurableObject<Env> {
     return [...byCode.values()].sort((a, b) => b.count - a.count || a.createdAt - b.createdAt);
   }
 
+  /** A lista como `viewer` a vê: cada sala com os servidores do Discord em comum com quem hospeda. */
+  private roomsFor(viewer: User, rooms: Room[], cache: Map<string, Set<string>>): Room[] {
+    const ids = (userId: string) => {
+      let set = cache.get(userId);
+      if (!set) cache.set(userId, (set = new Set(this.guildsOf(userId).map((g) => g.id))));
+      return set;
+    };
+    const mine = ids(viewer.id);
+    return rooms.map((r) => {
+      if (!mine.size) return { ...r, guilds: [] };
+      const theirs = ids(r.host.id);
+      return { ...r, guilds: [...mine].filter((g) => theirs.has(g)).slice(0, 10) };
+    });
+  }
+
   private broadcastRooms(except?: WebSocket): void {
-    const msg = JSON.stringify({ type: "rooms", rooms: this.rooms(except) });
+    const rooms = this.rooms(except);
+    const cache = new Map<string, Set<string>>();
+    const perUser = new Map<string, string>();
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === except) continue;
+      const user = (ws.deserializeAttachment() as Attachment | null)?.user;
+      if (!user) continue;
+      let msg = perUser.get(user.id);
+      if (!msg) perUser.set(user.id, (msg = JSON.stringify({ type: "rooms", rooms: this.roomsFor(user, rooms, cache) })));
       try {
         ws.send(msg);
       } catch {
         /* socket morrendo; o close dele chega depois */
       }
     }
+    this.trackClosed(rooms);
+  }
+
+  // ---------- avisos no canal do Discord (webhook) ----------
+
+  private webhook(): string | null {
+    const url = this.env.DISCORD_WEBHOOK_URL ?? "";
+    return /^https:\/\/(?:discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[\w-]+$/.test(url) ? url : null;
+  }
+
+  private openText(code: string, name: string, host: string, locked: boolean): string {
+    const origin = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'origin'").toArray()[0]?.v ?? "";
+    const link = origin ? `\n<${origin}/entrar/${code}>` : "";
+    return `🟢 **${discordText(host)}** abriu a sala **${discordText(name)}**${locked ? " 🔒" : ""}${link}`;
+  }
+
+  private async send(method: "POST" | "PATCH", path: string, content: string): Promise<{ id?: string } | null> {
+    const hook = this.webhook();
+    if (!hook) return null;
+    try {
+      const res = await fetch(`${hook}${path}`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content.slice(0, 1900), allowed_mentions: { parse: [] }, flags: 4 /* sem prévia do link */ }),
+      });
+      if (!res.ok) {
+        console.log("webhook do Discord falhou", res.status, await res.text().catch(() => ""));
+        return null;
+      }
+      return method === "POST" ? await res.json<{ id?: string }>().catch(() => null) : {};
+    } catch (e) {
+      console.log("webhook do Discord falhou", String(e));
+      return null;
+    }
+  }
+
+  /** Sala nova (ou que voltou dentro do prazo) → avisa no canal; se já estava anunciada, só tira o "sumiu". */
+  private async announceOpen(room: Room): Promise<void> {
+    if (!this.webhook()) return;
+    const prev = this.ctx.storage.sql.exec<{ message_id: string | null }>("SELECT message_id FROM announced WHERE code = ?", room.code).toArray()[0];
+    if (prev) {
+      this.ctx.storage.sql.exec("UPDATE announced SET gone_since = NULL, name = ?, host = ? WHERE code = ?", room.name, room.host.name, room.code);
+      return;
+    }
+    // Marca antes de enviar, para não anunciar duas vezes se outra mensagem chegar no meio.
+    this.ctx.storage.sql.exec("INSERT INTO announced(code, message_id, name, host, gone_since) VALUES (?, NULL, ?, ?, NULL)", room.code, room.name, room.host.name);
+    const msg = await this.send("POST", "?wait=true", this.openText(room.code, room.name, room.host.name, room.locked));
+    if (msg?.id && /^\d+$/.test(msg.id)) this.ctx.storage.sql.exec("UPDATE announced SET message_id = ? WHERE code = ?", msg.id, room.code);
+  }
+
+  /** Salas anunciadas que sumiram da lista: marca a hora e agenda a confirmação. */
+  private trackClosed(rooms: Room[]): void {
+    if (!this.webhook()) return;
+    const open = new Set(rooms.map((r) => r.code));
+    const now = Date.now();
+    let pending = false;
+    for (const row of this.ctx.storage.sql.exec<{ code: string; gone_since: number | null }>("SELECT code, gone_since FROM announced").toArray()) {
+      if (open.has(row.code)) {
+        if (row.gone_since !== null) this.ctx.storage.sql.exec("UPDATE announced SET gone_since = NULL WHERE code = ?", row.code);
+      } else {
+        if (row.gone_since === null) this.ctx.storage.sql.exec("UPDATE announced SET gone_since = ? WHERE code = ?", now, row.code);
+        pending = true;
+      }
+    }
+    if (pending) void this.ctx.storage.setAlarm(now + CLOSE_GRACE_MS + 1000);
+  }
+
+  /** Passado o prazo, edita o aviso para "encerrada". */
+  async alarm(): Promise<void> {
+    const open = new Set(this.rooms().map((r) => r.code));
+    const limit = Date.now() - CLOSE_GRACE_MS;
+    let pending = false;
+    for (const row of this.ctx.storage.sql
+      .exec<{ code: string; message_id: string | null; name: string; host: string; gone_since: number | null }>("SELECT * FROM announced WHERE gone_since IS NOT NULL")
+      .toArray()) {
+      if (open.has(row.code)) {
+        this.ctx.storage.sql.exec("UPDATE announced SET gone_since = NULL WHERE code = ?", row.code);
+      } else if (row.gone_since! <= limit) {
+        this.ctx.storage.sql.exec("DELETE FROM announced WHERE code = ?", row.code);
+        if (row.message_id) await this.send("PATCH", `/messages/${row.message_id}`, `⚫ ~~Sala **${discordText(row.name)}** de **${discordText(row.host)}**~~ encerrada`);
+      } else pending = true;
+    }
+    if (pending) await this.ctx.storage.setAlarm(Date.now() + CLOSE_GRACE_MS);
   }
 }
