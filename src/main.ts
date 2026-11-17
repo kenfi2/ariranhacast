@@ -503,11 +503,25 @@ function updateOverlay(): void {
  * só fica visível enquanto há algo para mostrar; com ninguém falando, ela some de verdade.
  */
 let overlayRows: { name: string; color: string; speaking: boolean; muted: boolean }[] = [];
+// Mostrar/esconder uma janela "sempre por cima" mexe com o Explorer (Alt+Tab, barra de tarefas). Fazer
+// isso a cada vez que alguém começa/para de falar deixava o Windows lento numa conversa longa. Agora a
+// janela aparece na hora, mas só some depois de um tempo sem ninguém falar.
+const OVERLAY_HIDE_MS = 15_000;
+let overlayHideTimer: NodeJS.Timeout | null = null;
 function syncOverlayVisible(): void {
   if (!overlay || overlay.isDestroyed() || overlay.webContents.isLoading()) return;
   const want = overlayRows.some((r) => overlayCfg.mode === 'all' || r.speaking);
-  if (want && !overlay.isVisible()) overlay.showInactive();
-  else if (!want && overlay.isVisible()) overlay.hide();
+  if (want) {
+    if (overlayHideTimer) clearTimeout(overlayHideTimer);
+    overlayHideTimer = null;
+    if (!overlay.isVisible()) overlay.showInactive();
+  } else if (overlay.isVisible() && !overlayHideTimer) {
+    overlayHideTimer = setTimeout(() => {
+      overlayHideTimer = null;
+      if (!overlay || overlay.isDestroyed()) return;
+      if (!overlayRows.some((r) => overlayCfg.mode === 'all' || r.speaking)) overlay.hide();
+    }, OVERLAY_HIDE_MS);
+  }
 }
 
 function cleanOverlayCfg(v: unknown): OverlayCfg {

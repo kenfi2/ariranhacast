@@ -101,10 +101,11 @@
 
     <!-- Sala -->
     <main id="view-room" class="view" hidden>
+      <!-- Um só botão para esconder/mostrar o painel, sempre no mesmo lugar (por cima do chat, se aberto) -->
+      <button id="btn-panel" type="button" class="panel-toggle" title="Esconder o painel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
       <div id="room-main">
         <div id="room-status" class="banner" hidden></div>
         <div id="stage" class="tiles"></div>
-        <button id="btn-panel-open" type="button" class="panel-tab" title="Mostrar o painel (voz e transmissão)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
         <div id="controls">
           <div class="ctl-left">
             <span class="label-inline">Sala</span>
@@ -127,10 +128,7 @@
       </div>
       <aside id="chat-side" class="side chat" hidden></aside>
       <aside id="room-side" class="side">
-        <div class="side-head">
-          <span>Painel</span>
-          <button id="btn-panel" type="button" class="icon-btn" title="Esconder o painel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
-        </div>
+        <div class="side-head"><span>Painel</span></div>
         <div id="voice-box" class="voice"></div>
         <div id="turn-usage" class="muted" hidden></div>
         <div id="mystream" hidden>
@@ -192,8 +190,8 @@
         <label>Senha
           <input id="create-pass" type="password" maxlength="64" placeholder="Opcional" autocomplete="off" />
         </label>
-        <label id="create-announce-row" class="check switch" title="Manda uma mensagem no canal de salas do Discord quando a sala abrir">
-          <span>Avisar no canal do Discord</span>
+        <label id="create-announce-row" class="check switch" title="Avisa no canal do Discord quando a sala abrir">
+          <span>Notificar</span>
           <input id="create-announce" type="checkbox" checked />
         </label>
         <fieldset class="host-mode">

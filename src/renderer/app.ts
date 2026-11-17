@@ -613,7 +613,7 @@ async function enterRoom(create: boolean, code?: string, password = '', title = 
   });
   $('chat-side').hidden = false;
   if (!lastNet) void probeNetwork().then((n) => (lastNet ??= n)).catch(() => {});
-  rememberRoom(r.code);
+  rememberRoom(r.code, roomTitle);
   $('room-code').textContent = r.code;
   show('room');
   onRoster(r.roster);
@@ -801,12 +801,13 @@ $('room-code').onclick = () => $('btn-copy').click();
 // Painel da sala (voz e sua transmissão): recolhe pelo botão no próprio painel; uma aba na borda reabre.
 const setPanel = (open: boolean): void => {
   $('room-side').hidden = !open;
-  $('btn-panel-open').hidden = open;
+  const b = $('btn-panel');
+  b.classList.toggle('closed', !open);
+  b.title = open ? 'Esconder o painel' : 'Mostrar o painel (voz e transmissão)';
   localStorage.setItem('ariranhacast.panel', open ? '1' : '0');
 };
 setPanel(localStorage.getItem('ariranhacast.panel') !== '0');
-$('btn-panel').onclick = () => setPanel(false);
-$('btn-panel-open').onclick = () => setPanel(true);
+$('btn-panel').onclick = () => setPanel($('room-side').hidden);
 $('btn-top-back').onclick = () => show('home');
 $('btn-back').onclick = () => show('room');
 
@@ -904,17 +905,25 @@ $('btn-invite').onclick = async () => {
 interface Recent {
   code: string;
   at: number;
+  name?: string;
 }
 function loadRecent(): Recent[] {
   try {
     const list = JSON.parse(localStorage.getItem('ariranhacast.recent') ?? '[]');
-    return Array.isArray(list) ? list.filter((r) => typeof r?.code === 'string' && /^[A-Z0-9]{4,16}$/.test(r.code)).slice(0, 5) : [];
+    return Array.isArray(list)
+      ? list
+          .filter((r) => typeof r?.code === 'string' && /^[A-Z0-9]{4,16}$/.test(r.code))
+          .map((r) => ({ code: r.code, at: Number(r.at) || 0, name: typeof r.name === 'string' ? r.name.slice(0, 40) : '' }))
+          .slice(0, 5)
+      : [];
   } catch {
     return [];
   }
 }
-function rememberRoom(code: string): void {
-  const list = [{ code, at: Date.now() }, ...loadRecent().filter((r) => r.code !== code)].slice(0, 5);
+function rememberRoom(code: string, name = ''): void {
+  const old = loadRecent();
+  name ||= old.find((r) => r.code === code)?.name ?? '';
+  const list = [{ code, at: Date.now(), name }, ...old.filter((r) => r.code !== code)].slice(0, 5);
   localStorage.setItem('ariranhacast.recent', JSON.stringify(list));
 }
 function ago(ts: number): string {
@@ -928,7 +937,7 @@ function renderRecent(): void {
     ...list.map((r) => {
       const li = el('li');
       const code = el('span', 'code', r.code);
-      code.title = 'Preencher o código';
+      code.title = r.name ? `${r.name} · preencher o código` : 'Preencher o código';
       code.onclick = () => ($<HTMLInputElement>('join-code').value = r.code);
       const join = el('button', 'ghost small', 'Entrar');
       join.type = 'button';
@@ -936,8 +945,10 @@ function renderRecent(): void {
       const reopen = el('button', 'ghost small', 'Recriar');
       reopen.type = 'button';
       reopen.title = 'Abrir de novo uma sala com este mesmo código (se ninguém estiver nela)';
-      reopen.onclick = () => void enterRoom(true, r.code, $<HTMLInputElement>('create-pass').value);
-      li.append(code, el('span', 'when', ago(r.at)), join, reopen);
+      reopen.onclick = () => void enterRoom(true, r.code, $<HTMLInputElement>('create-pass').value, r.name ?? '');
+      const when = el('span', 'when', r.name ? `${r.name} · ${ago(r.at)}` : ago(r.at));
+      when.title = when.textContent ?? '';
+      li.append(code, when, join, reopen);
       return li;
     }),
   );
@@ -1072,7 +1083,11 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   // Quem está na sala: bolinhas com a inicial (até 6) + quantos faltam.
   const people = el('div', 'lr-people');
   people.title = r.members.join('\n');
-  const names = r.members.length ? r.members : [r.host.name];
+  // Quem hospeda já aparece com a foto logo acima: as bolinhas mostram só os outros.
+  const names = [...r.members];
+  const hostAt = names.indexOf(r.host.name);
+  if (hostAt >= 0) names.splice(hostAt, 1);
+  people.hidden = !names.length;
   for (const n of names.slice(0, 6)) {
     const b = el('span', 'lr-dot', (n.trim()[0] ?? '?').toUpperCase());
     b.style.background = color(n);
@@ -1725,6 +1740,10 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('.share-tabs button
   void gameCaptureAvailable().then((ok) => ($('gamecap-row').hidden = !ok));
 }
 $('btn-share-cancel').onclick = () => $<HTMLDialogElement>('dlg-share').close();
+// Enquanto a transmissão está começando, Esc não fecha a janela (senão parece que nada aconteceu).
+$('dlg-share').addEventListener('cancel', (e) => {
+  if ($('btn-start').classList.contains('busy')) e.preventDefault();
+});
 $('btn-switch').onclick = () => openShare(true);
 
 // Perfis prontos: preenchem as opções; mexer em qualquer uma vira "Personalizado".
@@ -1953,7 +1972,12 @@ $('btn-start').onclick = async () => {
   if (!selected || !room) return;
   const { opts, height, audio, maxDirect } = readOpts();
   const btn = $<HTMLButtonElement>('btn-start');
+  const label = btn.textContent;
   btn.disabled = true;
+  // A captura de jogo pode levar alguns segundos na primeira vez (o hook entra no jogo): mostra que está indo.
+  btn.classList.add('busy');
+  btn.textContent = selected.kind === 'window' && gameCapOn() ? 'Conectando ao jogo…' : 'Iniciando…';
+  $('btn-share-cancel').hidden = true;
   try {
     const { stream, note } = await capture(selected, height, opts.maxFps, audio, opts.mode);
     if (switching && broadcast && localScreen) {
@@ -1971,7 +1995,10 @@ $('btn-start').onclick = async () => {
   } catch (e: any) {
     toast(`Não foi possível capturar: ${e?.message ?? e}`);
   } finally {
+    btn.classList.remove('busy');
+    btn.textContent = label;
     btn.disabled = !selected;
+    $('btn-share-cancel').hidden = false;
   }
 };
 
