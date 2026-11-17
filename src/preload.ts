@@ -1,10 +1,56 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, sharedTexture } from 'electron';
 
 // Única ponte entre a página e o sistema. A página não tem acesso ao Node.js; só a estas funções.
 const on = (channel: string, cb: (...args: any[]) => void) => {
   ipcRenderer.removeAllListeners(channel);
   ipcRenderer.on(channel, (_e, ...args) => cb(...args));
 };
+
+// ---- captura de jogo: quadros vindos da placa de vídeo ----
+// O processo principal envia cada quadro como textura importada; aqui ela vira um VideoFrame,
+// que segue para a página por um MessagePort (transferível entre o mundo isolado do preload e o
+// da página). As últimas texturas ficam referenciadas enquanto o codificador ainda pode lê-las;
+// ao soltá-las, o gamecap.exe pode reaproveitar a textura.
+let framePort: MessagePort | null = null;
+const held: { release(): void }[] = [];
+function releaseHeld(keep: number): void {
+  while (held.length > keep) {
+    try {
+      held.shift()!.release();
+    } catch {
+      /* já solta */
+    }
+  }
+}
+const textureSupport = typeof sharedTexture?.setSharedTextureReceiver === 'function';
+if (textureSupport) {
+  sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }) => {
+    try {
+      if (framePort) {
+        const frame = importedSharedTexture.getVideoFrame();
+        framePort.postMessage(frame, [frame]);
+      }
+    } catch {
+      /* quadro perdido */
+    } finally {
+      held.push(importedSharedTexture);
+      releaseHeld(4);
+    }
+  });
+}
+/** Abre um canal novo de quadros e o entrega à página (por window.postMessage, que transfere a porta). */
+function openFrameChannel(): void {
+  framePort?.close();
+  releaseHeld(0);
+  const ch = new MessageChannel();
+  framePort = ch.port1;
+  window.postMessage({ type: 'ariranhacast:frames' }, '*', [ch.port2]);
+}
+function closeFrameChannel(): void {
+  framePort?.close();
+  framePort = null;
+  releaseHeld(0);
+}
 
 contextBridge.exposeInMainWorld('ariranhacast', {
   getSources: () => ipcRenderer.invoke('lc:sources'),
@@ -14,6 +60,16 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   appVersion: () => ipcRenderer.invoke('lc:version'),
   startAudioCap: (sourceId: string) => ipcRenderer.invoke('lc:audiocap-start', sourceId),
   stopAudioCap: () => ipcRenderer.invoke('lc:audiocap-stop'),
+  gameCapAvailable: async () => textureSupport && (await ipcRenderer.invoke('lc:gamecap-available')) === true,
+  gameCapStart: (sourceId: string, fps: number, height: number) => {
+    openFrameChannel();
+    return ipcRenderer.invoke('lc:gamecap-start', sourceId, fps, height);
+  },
+  gameCapStop: () => {
+    closeFrameChannel();
+    return ipcRenderer.invoke('lc:gamecap-stop');
+  },
+  onGameCap: (cb: (s: unknown) => void) => on('lc:gamecap', cb),
   onPcm: (cb: (chunk: Uint8Array) => void) => on('lc:pcm', cb),
   setHotkeys: (keys: { mic: string; deaf: string; clip: string; voice: string } | null) => ipcRenderer.invoke('lc:hotkeys', keys),
   onHotkey: (cb: (which: 'mic' | 'deaf' | 'leave' | 'clip' | 'voice') => void) => on('lc:hotkey', cb),

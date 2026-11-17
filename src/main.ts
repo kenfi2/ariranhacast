@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, session, sharedTexture, shell, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -189,6 +189,138 @@ function startAudioCap(sourceId: unknown): Promise<{ ok: boolean; reason?: strin
     child.on('exit', (code) => {
       settle(false, err.trim().slice(0, 200) || `código ${code}`);
       if (audiocap === child) audiocap = null;
+    });
+  });
+}
+
+// ---------- captura de jogo (gamecap.exe + graphics-hook do OBS) ----------
+// O gamecap.exe injeta o hook do OBS no jogo e desenha cada quadro numa de suas texturas
+// compartilhadas (handle NT, já duplicado para dentro deste processo). Aqui cada quadro é
+// importado com o sharedTexture do Electron e enviado à janela, que o entrega ao WebRTC: o
+// quadro nunca sai da placa de vídeo. Ver native/gamecap.cpp.
+type GcState = { state: 'hooked'; width: number; height: number; kind: string } | { state: 'lost' | 'ended' | 'error'; reason: string };
+let gamecap: ChildProcess | null = null;
+
+function stopGameCap(): void {
+  const child = gamecap;
+  gamecap = null;
+  if (!child) return;
+  try {
+    child.stdin?.end('Q\n');
+  } catch {
+    /* já fechou */
+  }
+  setTimeout(() => {
+    if (child.exitCode === null) child.kill();
+  }, 2000);
+}
+
+function startGameCap(sourceId: unknown, fps: unknown, height: unknown): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }> {
+  stopGameCap();
+  return new Promise((resolve) => {
+    const exe = path.join(__dirname, '..', 'native', 'gamecap.exe');
+    const obsDir = path.join(__dirname, '..', 'native', 'obs');
+    const m = typeof sourceId === 'string' && SOURCE_ID.test(sourceId) ? sourceId.match(/^window:(\d+):/) : null;
+    if (!m) return resolve({ ok: false, reason: 'só funciona com janelas' });
+    if (process.platform !== 'win32' || !fs.existsSync(exe) || !fs.existsSync(obsDir)) return resolve({ ok: false, reason: 'indisponível neste sistema' });
+    if (typeof sharedTexture?.importSharedTexture !== 'function') return resolve({ ok: false, reason: 'esta versão do Electron não importa texturas' });
+    const f = Math.min(240, Math.max(1, Math.round(Number(fps) || 60)));
+    const h = Math.min(4320, Math.max(0, Math.round(Number(height) || 0)));
+    // Argumentos sempre numéricos (e o caminho do próprio app), passados como lista e sem shell.
+    const args = ['--hwnd', m[1], '--parent', String(process.pid), '--fps', String(f), '--height', String(h), '--obs', obsDir];
+    const child = spawn(exe, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: false });
+    gamecap = child;
+
+    let settled = false;
+    const settle = (r: { ok: boolean; reason?: string; width?: number; height?: number }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (!r.ok && gamecap === child) stopGameCap();
+      resolve(r);
+    };
+    const timeout = setTimeout(() => settle({ ok: false, reason: 'o jogo não respondeu' }), 20000);
+    const event = (s: GcState) => {
+      if (gamecap === child) send('lc:gamecap', s); // eventos de uma captura já substituída são ignorados
+    };
+
+    let gen = -1;
+    const textures = new Map<number, { buf: Buffer; w: number; h: number }>();
+    let inflight = 0;
+    let importWarned = false;
+    const release = (g: number, i: number) => {
+      if (child.exitCode === null && child.stdin?.writable) child.stdin.write(`R ${g} ${i}\n`);
+    };
+    const onFrame = (g: number, i: number, us: number) => {
+      const t = textures.get(i);
+      // Quadro de uma geração antiga (o jogo mudou de resolução), sem janela, ou janela atrasada: descarta.
+      if (g !== gen || !t || !win || win.isDestroyed() || inflight >= 2) return release(g, i);
+      let imported: Electron.SharedTextureImported;
+      try {
+        imported = sharedTexture.importSharedTexture({
+          textureInfo: { pixelFormat: 'bgra', codedSize: { width: t.w, height: t.h }, handle: { ntHandle: t.buf }, timestamp: us },
+          allReferencesReleased: () => release(g, i),
+        });
+      } catch (e) {
+        if (!importWarned) writeLog('error', 'gamecap', e);
+        importWarned = true;
+        return release(g, i);
+      }
+      inflight++;
+      void sharedTexture
+        .sendSharedTexture({ frame: win.webContents.mainFrame, importedSharedTexture: imported }, g)
+        .catch(() => {})
+        .finally(() => {
+          inflight--;
+          imported.release();
+        });
+    };
+
+    let buf = '';
+    child.stdout!.setEncoding('utf8');
+    child.stdout!.on('data', (chunk: string) => {
+      buf += chunk;
+      if (buf.length > 1_000_000) buf = buf.slice(-10_000);
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        const sp = line.indexOf(' ');
+        const cmd = sp === -1 ? line : line.slice(0, sp);
+        const rest = sp === -1 ? '' : line.slice(sp + 1);
+        const nums = rest.split(' ').map(Number);
+        if (cmd === 'FRAME') onFrame(nums[0], nums[1], nums[2]);
+        else if (cmd === 'TEX') {
+          const [g, i, , w, hh] = nums;
+          if (g !== gen) {
+            gen = g;
+            textures.clear();
+          }
+          const handle = rest.split(' ')[2] ?? '0';
+          const b = Buffer.alloc(8);
+          b.writeBigUInt64LE(BigInt(/^\d{1,20}$/.test(handle) ? handle : '0'));
+          if (i >= 0 && i < 16 && w > 0 && hh > 0) textures.set(i, { buf: b, w, h: hh });
+        } else if (cmd === 'HOOKED') {
+          writeLog('info', 'gamecap', line);
+          settle({ ok: true, width: nums[0], height: nums[1] });
+          event({ state: 'hooked', width: nums[0], height: nums[1], kind: rest.split(' ')[2] ?? '' });
+        } else if (cmd === 'LOST') {
+          writeLog('info', 'gamecap', line);
+          event({ state: 'lost', reason: rest });
+        } else if (cmd === 'ERROR') {
+          writeLog('warn', 'gamecap', line);
+          if (settled) event({ state: 'error', reason: rest });
+          settle({ ok: false, reason: rest.slice(0, 200) });
+        } else if (cmd === 'LOG') {
+          writeLog('info', 'gamecap', rest);
+        }
+      }
+    });
+    child.on('error', (e) => settle({ ok: false, reason: e.message }));
+    child.on('exit', (code) => {
+      settle({ ok: false, reason: `encerrou (código ${code})` });
+      event({ state: 'ended', reason: `código ${code}` });
+      if (gamecap === child) gamecap = null;
     });
   });
 }
@@ -855,6 +987,9 @@ app.whenReady().then(() => {
   handle('lc:version', () => app.getVersion());
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
+  handle('lc:gamecap-available', () => process.platform === 'win32' && fs.existsSync(path.join(__dirname, '..', 'native', 'gamecap.exe')) && typeof sharedTexture?.importSharedTexture === 'function');
+  handle('lc:gamecap-start', (sourceId: unknown, fps: unknown, height: unknown) => startGameCap(sourceId, fps, height));
+  handle('lc:gamecap-stop', () => stopGameCap());
   handle('lc:hotkeys', (keys: unknown) => setHotkeys(keys));
   handle('lc:updater-state', () => upd);
   handle('lc:updater-check', () => checkForUpdates());
@@ -964,5 +1099,6 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   stopAudioCap();
+  stopGameCap();
 });
 app.on('window-all-closed', () => app.quit());

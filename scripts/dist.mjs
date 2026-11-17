@@ -9,12 +9,15 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { checkObs } from './check-obs.mjs';
 import { hardenExe } from './harden-exe.mjs';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const version = pkg.version;
 const updateUrl = String(pkg.ariranhacast?.updateUrl ?? '');
 if (updateUrl && !updateUrl.startsWith('https://')) throw new Error('ariranhacast.updateUrl precisa começar com https://');
+
+checkObs(); // arquivos do OBS da captura de jogo: iguais aos registrados?
 
 // 1. Pasta do app (Electron + nosso código), com o executável endurecido.
 let appDir = '';
@@ -25,7 +28,7 @@ await build({
     appId: 'dev.ariranhacast.app',
     productName: 'AriranhaCast',
     directories: { output: 'release' },
-    files: ['dist/**/*', 'native/audiocap.exe', 'package.json'],
+    files: ['dist/**/*', 'native/audiocap.exe', 'native/gamecap.exe', 'native/obs/*.exe', 'native/obs/*.dll', 'native/obs/LEIA-ME.md', 'package.json'],
     asar: false,
     npmRebuild: false,
     ...(process.env.ELECTRON_DIST ? { electronDist: process.env.ELECTRON_DIST } : {}),

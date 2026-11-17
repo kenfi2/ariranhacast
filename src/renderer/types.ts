@@ -12,6 +12,11 @@ export interface AriranhaBridge {
   platform(): Promise<string>;
   startAudioCap(sourceId: string): Promise<{ ok: boolean; reason?: string }>;
   stopAudioCap(): Promise<void>;
+  gameCapAvailable(): Promise<boolean>;
+  /** Os quadros chegam por um MessagePort entregue via window.postMessage({ type: 'ariranhacast:frames' }). */
+  gameCapStart(sourceId: string, fps: number, height: number): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }>;
+  gameCapStop(): Promise<void>;
+  onGameCap(cb: (s: GameCapState) => void): void;
   onPcm(cb: (chunk: Uint8Array) => void): void;
   setHotkeys(keys: { mic: string; deaf: string; clip: string; voice: string } | null): Promise<{ mic: boolean; deaf: boolean; clip: boolean; voice: boolean }>;
   onHotkey(cb: (which: 'mic' | 'deaf' | 'leave' | 'clip' | 'voice') => void): void;
@@ -41,6 +46,10 @@ export interface AriranhaBridge {
   logError(text: string): Promise<void>;
   openLogs(): Promise<boolean>;
 }
+
+export type GameCapState =
+  | { state: 'hooked'; width: number; height: number; kind: string }
+  | { state: 'lost' | 'ended' | 'error'; reason: string };
 
 export interface GfxConfig {
   hwAccel: boolean;

@@ -7,6 +7,7 @@ import { ClipBuffer } from './clips';
 import { measurePc, type Route } from './link';
 import { describeNetwork, probeNetwork, type NetInfo } from './netcheck';
 import { hasTurn, loadIce, net, normalizeCode } from './signaling';
+import { gameCaptureAvailable, isGameCaptureTrack, startGameCapture, stopGameCapture } from './gamecap';
 import type { CodecChoice, EncodeOpts, GfxConfig, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
 import { addSticker, listMyEmotes, listStickers } from './library';
@@ -1129,6 +1130,12 @@ function openShare(isSwitch: boolean): void {
 }
 
 $('btn-refresh').onclick = () => void refreshSources();
+{
+  const box = $<HTMLInputElement>('opt-gamecap');
+  box.checked = localStorage.getItem('ariranhacast.gamecap') === '1';
+  box.onchange = () => localStorage.setItem('ariranhacast.gamecap', box.checked ? '1' : '0');
+  void gameCaptureAvailable().then((ok) => ($('gamecap-row').hidden = !ok));
+}
 $('btn-share-cancel').onclick = () => $<HTMLDialogElement>('dlg-share').close();
 $('btn-switch').onclick = () => openShare(true);
 
@@ -1244,6 +1251,31 @@ async function capture(source: SourceInfo, height: number, fps: number, audio: A
     stopAppAudio();
   }
 
+  // Captura de jogo (como o OBS/Discord) para janelas, se estiver ligada. Se não der, segue
+  // com a captura de janela normal e avisa o motivo.
+  if (source.kind === 'window' && gameCapOn()) {
+    let gameTrack: MediaStreamTrack | null = null;
+    const g = await startGameCapture(source, fps, height, (why) => {
+      if (gameTrack && localScreen?.getVideoTracks().includes(gameTrack)) {
+        stopShare();
+        toast(`A captura do jogo terminou (${why}).`);
+      }
+    });
+    if ('track' in g) {
+      gameTrack = g.track;
+      const stream = new MediaStream([g.track]);
+      if (appTrack) stream.addTrack(appTrack);
+      else {
+        const sys = await systemAudioOnly().catch(() => null);
+        if (sys) stream.addTrack(sys);
+        else note += (note ? ' ' : '') + 'Sem áudio nesta transmissão.';
+      }
+      applyHints(stream, mode);
+      return { stream, note: note || 'Captura de jogo (sem borda).' };
+    }
+    note += (note ? ' ' : '') + `Captura de jogo indisponível (${g.error}); usando a captura de janela.`;
+  }
+
   await window.ariranhacast.selectSource(source.id, system);
   const video: MediaTrackConstraints = { frameRate: { ideal: fps, max: fps } };
   if (height) {
@@ -1273,6 +1305,28 @@ async function capture(source: SourceInfo, height: number, fps: number, audio: A
   if (appTrack) stream.addTrack(appTrack);
   applyHints(stream, mode);
   return { stream, note };
+}
+
+const gameCapOn = (): boolean => localStorage.getItem('ariranhacast.gamecap') === '1';
+
+/** Áudio do sistema inteiro (menos o próprio app), sem vídeo: para a captura de jogo quando o áudio por aplicativo não deu. */
+async function systemAudioOnly(): Promise<MediaStreamTrack | null> {
+  const screen = (await window.ariranhacast.getSources()).find((s) => s.kind === 'screen');
+  if (!screen) return null;
+  await window.ariranhacast.selectSource(screen.id, true);
+  const s = await navigator.mediaDevices.getDisplayMedia({
+    video: { frameRate: { max: 1 }, width: { max: 64 }, height: { max: 64 } },
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, restrictOwnAudio: true } as MediaTrackConstraints,
+  });
+  s.getVideoTracks().forEach((t) => t.stop());
+  return s.getAudioTracks()[0] ?? null;
+}
+
+/** Encerra as faixas de uma captura (e o gamecap.exe, se for a captura de jogo). */
+function endStream(stream: MediaStream | null): void {
+  if (!stream) return;
+  if (stream.getVideoTracks().some((t) => isGameCaptureTrack(t))) stopGameCapture();
+  stream.getTracks().forEach((t) => t.stop());
 }
 
 function applyHints(stream: MediaStream, mode: EncodeOpts['mode']): void {
@@ -1317,7 +1371,8 @@ $('btn-start').onclick = async () => {
     if (switching && broadcast && localScreen) {
       const old = localScreen;
       await broadcast.replaceStream(stream, selected.name);
-      old.getTracks().forEach((t) => t.stop());
+      if (!stream.getVideoTracks().some((t) => isGameCaptureTrack(t))) endStream(old);
+      else old.getTracks().forEach((t) => t.stop()); // a captura de jogo nova já substituiu a antiga
       if (broadcast.paused) broadcast.setPaused(false); // a fonte nova entra ao vivo
       setLocalScreen(stream, selected.name, note);
       updateControls();
@@ -1371,7 +1426,7 @@ function stopShare(): void {
   if (!broadcast) return;
   broadcast.stop();
   broadcast = null;
-  localScreen?.getTracks().forEach((t) => t.stop());
+  endStream(localScreen);
   localScreen = null;
   stopAppAudio();
   stopMeter();

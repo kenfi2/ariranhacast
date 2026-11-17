@@ -125,3 +125,25 @@ pedido de administrador do próprio Windows (UAC).
 - **Figurinhas e emotes pessoais.** Ficam no armazenamento local do app (IndexedDB), só neste PC. Passam pelas mesmas verificações das imagens do chat (tipo conferido pelos bytes, limite de 1 MB por figurinha e 128 KB por emote). Só o dono de um emote (ou quem hospeda) consegue tirá-lo da sala.
 - **Teste de microfone.** O retorno toca só no seu PC; durante o teste o envio para a sala fica cortado.
 - **Não verificado em Windows real:** o retorno do microfone na saída escolhida, o formato do clipe de voz (deve sair .m4a; no Linux de teste saiu .webm) e a ausência da borda amarela no Windows 11.
+
+## Captura de jogo (0.7.0, experimental)
+
+- **O que faz.** Com "Captura de jogo" marcada na tela de transmitir, o app carrega dentro do
+  jogo o mesmo módulo de captura do OBS Studio (`graphics-hook64.dll`/`32.dll`), que copia cada
+  quadro para uma textura da placa de vídeo. É assim que o OBS e o Discord capturam jogos.
+- **Arquivos de terceiros.** Os seis arquivos de `native/obs` são do OBS Studio 33.0.1, sem
+  modificação, assinados pela OBS Project, LLC, e conferidos por SHA-256 a cada build. Licença
+  GPL-2.0-ou-posterior; fonte e detalhes em `native/obs/LEIA-ME.md`.
+- **Injeção.** Usa o modo "compatível com anti-cheat" do OBS (`SetWindowsHookEx` na thread da
+  janela do jogo, só com o módulo assinado). Nunca é feita sem a opção marcada, nunca em
+  navegadores, Discord, Explorer e outros programas da lista de bloqueio, e só no processo dono
+  da janela escolhida. O módulo fica carregado no jogo até ele fechar (como no OBS); sem o
+  AriranhaCast aberto ele para de copiar em até 5 s.
+- **Anti-cheat.** Muitos anti-cheats aceitam o módulo do OBS, mas não há garantia: alguns podem
+  bloquear a captura ou, no pior caso, sinalizar a conta. Teste primeiro com cuidado (de
+  preferência numa conta secundária) em jogos com Vanguard, Easy Anti-Cheat ou BattlEye.
+- **gamecap.exe.** Compilado de `native/gamecap.cpp` (incluído). Não usa rede nem grava arquivos;
+  recebe só números como argumentos (sem shell) e só abre o processo do jogo para consulta e o do
+  próprio AriranhaCast para lhe entregar as texturas.
+- **Não verificado em Windows real:** tudo desta seção. Foi compilado e revisado, mas não rodou
+  com um jogo de verdade antes de ir para a release.
