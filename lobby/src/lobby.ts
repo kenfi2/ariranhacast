@@ -301,15 +301,15 @@ export class Lobby extends DurableObject<Env> {
     return `🟢 **${discordText(host)}** abriu a sala **${discordText(name)}**${locked ? " 🔒" : ""}${link}`;
   }
 
-  private async send(method: "POST" | "PATCH", path: string, content: string): Promise<{ id?: string } | null> {
+  private async send(method: "POST" | "DELETE", path: string, content = ""): Promise<{ id?: string } | null> {
     const hook = this.webhook();
     if (!hook) return null;
     try {
       const res = await fetch(`${hook}${path}`, {
         method,
-        headers: { "Content-Type": "application/json" },
-        // Ao criar: flags 4 = sem prévia do link. Ao editar, só o texto (a edição não aceita trocar flags).
-        body: JSON.stringify(method === "POST" ? { content: content.slice(0, 1900), allowed_mentions: { parse: [] }, flags: 4 } : { content: content.slice(0, 1900), allowed_mentions: { parse: [] } }),
+        ...(method === "DELETE" ? {} : { headers: { "Content-Type": "application/json" } }),
+        // flags 4 = sem prévia do link.
+        ...(method === "POST" ? { body: JSON.stringify({ content: content.slice(0, 1900), allowed_mentions: { parse: [] }, flags: 4 }) } : {}),
       });
       if (!res.ok) {
         console.log("webhook do Discord falhou", res.status, await res.text().catch(() => ""));
@@ -390,9 +390,9 @@ export class Lobby extends DurableObject<Env> {
       if (open.has(row.code)) {
         this.ctx.storage.sql.exec("UPDATE announced SET gone_since = NULL WHERE code = ?", row.code);
       } else if (row.gone_since! <= limit) {
-        console.log("sala encerrada", row.code, row.message_id ? "editando o aviso" : "sem id do aviso");
+        console.log("sala encerrada", row.code, row.message_id ? "apagando o aviso" : "sem id do aviso");
         this.ctx.storage.sql.exec("DELETE FROM announced WHERE code = ?", row.code);
-        if (row.message_id) await this.send("PATCH", `/messages/${row.message_id}`, `⚫ ~~Sala **${discordText(row.name)}** de **${discordText(row.host)}**~~ encerrada`);
+        if (row.message_id) await this.send("DELETE", `/messages/${row.message_id}`);
       } else pending = true;
     }
     if (pending) await this.ctx.storage.setAlarm(Date.now() + CLOSE_GRACE_MS);

@@ -43,7 +43,7 @@ Depois de mudar o `wrangler.jsonc`, rode `npx wrangler deploy` de novo. Só apar
 
 ## 3b. Avisos num canal do Discord (opcional)
 
-Quando alguém **que é membro do servidor do webhook** abre uma sala, o lobby posta no canal (salas de quem não está no servidor não aparecem): "🟢 **Mathias** abriu a sala **aoba** 🔒" com um link que abre o app direto na sala. Quando a sala fecha (e fica fechada por 30 segundos), a mensagem vira "⚫ ~~Sala aoba de Mathias~~ encerrada". Nada de @everyone: o aviso nunca menciona ninguém.
+Quando alguém **que é membro do servidor do webhook** abre uma sala, o lobby posta no canal (salas de quem não está no servidor não aparecem): "🟢 **Mathias** abriu a sala **aoba** 🔒" com um link que abre o app direto na sala. Quando a sala fecha (e fica fechada por 30 segundos), a mensagem é apagada do canal. Nada de @everyone: o aviso nunca menciona ninguém.
 
 1. No Discord, no canal desejado: **Editar canal → Integrações → Webhooks → Novo webhook** → **Copiar URL do webhook**.
 2. Na pasta `lobby/`:
