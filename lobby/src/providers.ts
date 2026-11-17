@@ -34,7 +34,6 @@ export const PROVIDERS: Provider[] = [
     token: "https://discord.com/api/oauth2/token",
     userinfo: "https://discord.com/api/v10/users/@me",
     scope: "identify",
-    extraAuthParams: { prompt: "none" },
     clientId: (env) => env.DISCORD_CLIENT_ID,
     clientSecret: (env) => env.DISCORD_CLIENT_SECRET,
     toUser: (u) => {
