@@ -44,7 +44,7 @@ export interface AriranhaBridge {
 
 export interface GfxConfig {
   hwAccel: boolean;
-  capture: 'modern' | 'compat';
+  capture: 'auto' | 'wgc' | 'compat';
 }
 
 export interface GifItem {

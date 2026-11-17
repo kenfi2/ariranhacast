@@ -65,14 +65,19 @@ process.on('unhandledRejection', (e) => writeLog('error', 'main (promise)', e));
 // Lido antes do app iniciar: são opções do Chromium que só valem com o app reiniciado.
 //  hwAccel: aceleração de hardware (GPU) da interface e do vídeo. Desligar ajuda em PCs em que a
 //    GPU está no limite com o jogo/filme, ou com drivers problemáticos; o encode passa para a CPU.
-//  capture: 'modern' usa o Windows.Graphics.Capture (padrão); 'compat' usa os métodos antigos
-//    (DXGI para telas, GDI para janelas), útil quando uma janela aparece preta ou nem aparece
-//    (ex.: navegador com a aceleração de hardware desligada).
-type Gfx = { hwAccel: boolean; capture: 'modern' | 'compat' };
+//  capture:
+//    'auto' (padrão): tela inteira pelo DXGI (Desktop Duplication), que nunca desenha borda;
+//      janelas pelo Windows.Graphics.Capture (WGC). No Windows 10 o WGC sempre desenha a borda
+//      amarela/laranja, inclusive na tela inteira; por isso a tela não usa mais o WGC.
+//    'wgc': tudo pelo WGC (o comportamento até a 0.6.3).
+//    'compat': tudo pelos métodos antigos (DXGI para telas, GDI para janelas), sem borda nenhuma;
+//      útil quando uma janela aparece preta ou nem aparece (ex.: navegador sem aceleração de
+//      hardware), mas jogos e janelas aceleradas podem sair pretos.
+type Gfx = { hwAccel: boolean; capture: 'auto' | 'wgc' | 'compat' };
 const gfxFile = (): string => path.join(app.getPath('userData'), 'graphics.json');
 function cleanGfx(v: unknown): Gfx {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
-  return { hwAccel: o.hwAccel !== false, capture: o.capture === 'compat' ? 'compat' : 'modern' };
+  return { hwAccel: o.hwAccel !== false, capture: o.capture === 'compat' || o.capture === 'wgc' ? o.capture : 'auto' };
 }
 function loadGfx(): Gfx {
   try {
@@ -94,7 +99,8 @@ app.commandLine.appendSwitch(
 // WebRtcWgcRequireBorder desligado: pede ao Windows para não desenhar a borda amarela em volta
 // do que está sendo capturado (o Windows 10 ignora o pedido na captura de janelas).
 const disabled = ['WebRtcHideLocalIpsWithMdns', 'WebRtcWgcRequireBorder'];
-if (gfx.capture === 'compat') disabled.push('AllowWgcScreenCapturer', 'AllowWgcWindowCapturer');
+if (gfx.capture !== 'wgc') disabled.push('AllowWgcScreenCapturer');
+if (gfx.capture === 'compat') disabled.push('AllowWgcWindowCapturer');
 app.commandLine.appendSwitch('disable-features', disabled.join(','));
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
@@ -340,6 +346,9 @@ function updateOverlay(): void {
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setIgnoreMouseEvents(true);
+  // Fica fora de qualquer captura (WDA_EXCLUDEFROMCAPTURE): não vaza na transmissão da tela
+  // inteira; quem assiste já tem o próprio overlay.
+  overlay.setContentProtection(true);
   overlay.setVisibleOnAllWorkspaces(true);
   void overlay.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
   overlay.webContents.once('did-finish-load', () => {
@@ -816,8 +825,12 @@ app.whenReady().then(() => {
       types: ['screen', 'window'],
       thumbnailSize: { width: 320, height: 180 },
     });
+    // Nossas próprias janelas (a principal e o overlay) não aparecem como opção.
+    const own = [win, overlay]
+      .filter((w): w is BrowserWindow => !!w && !w.isDestroyed())
+      .map((w) => w.getMediaSourceId().split(':').slice(0, 2).join(':') + ':');
     return sources
-      .filter((s) => s.name !== 'AriranhaCast')
+      .filter((s) => s.name !== 'AriranhaCast' && !own.some((p) => s.id.startsWith(p)))
       .map((s) => ({
         id: s.id,
         name: s.name,

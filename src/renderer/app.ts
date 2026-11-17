@@ -222,7 +222,7 @@ async function refreshGfx(): Promise<void> {
 }
 async function saveGfx(): Promise<void> {
   const g = await window.ariranhacast
-    .gfxSet({ hwAccel: $<HTMLInputElement>('set-hwaccel').checked, capture: $<HTMLSelectElement>('set-capture').value === 'compat' ? 'compat' : 'modern' })
+    .gfxSet({ hwAccel: $<HTMLInputElement>('set-hwaccel').checked, capture: $<HTMLSelectElement>('set-capture').value as GfxConfig['capture'] })
     .catch(() => null);
   if (g) renderGfx(g);
 }

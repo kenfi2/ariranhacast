@@ -104,7 +104,7 @@
           <h3>Telas</h3>
           <div id="grid-screens" class="grid"></div>
           <h3>Janelas</h3>
-          <p id="share-border-tip" class="muted" hidden>No Windows 10, o próprio Windows desenha uma borda amarela na janela capturada e nenhum app consegue tirar (quem assiste não vê a borda). Para não ter a borda, transmita a tela inteira; no Windows 11 ela não aparece.</p>
+          <p id="share-border-tip" class="muted" hidden>No Windows 10, o próprio Windows desenha uma borda amarela na janela capturada e nenhum app consegue tirar (quem assiste não vê a borda). Para não ter a borda, transmita a tela inteira; no Windows 11 ela não aparece. Também dá para mudar em Configurações > Desempenho.</p>
           <div id="grid-windows" class="grid"></div>
         </div>
         <aside class="share-side">
@@ -251,11 +251,12 @@
         <p class="muted">Desligue se o PC travar ou engasgar enquanto transmite um jogo ou filme, ou se a placa de vídeo já estiver no limite. A interface e a codificação do vídeo passam para o processador.</p>
         <label>Método de captura
           <select id="set-capture">
-            <option value="modern">Moderno (Windows.Graphics.Capture) — recomendado</option>
-            <option value="compat">Compatível (método antigo)</option>
+            <option value="auto">Automático — tela inteira sem borda (recomendado)</option>
+            <option value="wgc">Moderno em tudo (Windows.Graphics.Capture)</option>
+            <option value="compat">Compatível (método antigo, nunca tem borda)</option>
           </select>
         </label>
-        <p class="muted">Use o Compatível se alguma janela aparecer preta, congelada ou nem aparecer na lista (por exemplo, o navegador com a aceleração de hardware desligada). Transmitir a tela inteira costuma funcionar nos dois.</p>
+        <p class="muted">Automático: a tela inteira é capturada sem a borda do Windows; janelas usam o método moderno (no Windows 10 a janela capturada ganha uma borda amarela que nenhum app consegue tirar). Compatível: sem borda em nada, mas jogos e janelas aceleradas podem sair pretos; use se alguma janela aparecer preta ou nem aparecer na lista (ex.: navegador sem aceleração de hardware).</p>
         <div id="gfx-restart" class="row between" hidden>
           <span class="muted">Reinicie o AriranhaCast para aplicar.</span>
           <button id="btn-gfx-restart" type="button" class="ghost">Reiniciar agora</button>
