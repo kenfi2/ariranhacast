@@ -25,6 +25,13 @@
       </div>
     </header>
 
+    <!-- Na tela inicial durante uma chamada: a chamada continua; só a tela mudou -->
+    <div id="back-bar" class="back-bar" hidden>
+      <span class="dot" aria-hidden="true"></span>
+      <span>Você está na sala <strong id="back-name"></strong>. A chamada continua.</span>
+      <button id="btn-back" type="button" class="primary small">Voltar para a sala</button>
+    </div>
+
     <!-- Início -->
     <main id="view-home" class="view">
       <!-- Login (obrigatório quando o app tem servidor de lobby) -->
@@ -99,6 +106,7 @@
             <button id="btn-leave" class="round hangup" title="Sair da sala"></button>
           </div>
           <div class="ctl-right">
+            <button id="btn-rooms" class="ghost small" title="Ver as salas abertas sem sair desta">Salas</button>
             <button id="btn-panel" class="ghost small">Painel</button>
           </div>
         </div>
