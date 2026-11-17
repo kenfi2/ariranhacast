@@ -119,6 +119,10 @@ let flashing = false;
 
 const INDEX = path.join(__dirname, 'renderer', 'index.html');
 const SOURCE_ID = /^(screen|window):\d{1,20}:\d{1,10}$/;
+// Janelas de sistema/overlay que o Windows lista como "janela", mas não são algo a transmitir
+// (são transparentes ou ficam pretas na captura).
+const HIDDEN_WINDOWS =
+  /^(?:NVIDIA GeForce Overlay|NVIDIA Overlay|NVIDIA App Overlay|AMD (?:Radeon )?Software(?:: Adrenalin Edition)? Overlay|Radeon Overlay|Xbox Game Bar|Game Bar|Steam Overlay|Program Manager|Microsoft Text Input Application|Windows Input Experience|Experiência de Entrada do Windows|Aplicativo de Entrada de Texto da Microsoft)$/i;
 
 /** Só a nossa própria janela, carregando a nossa própria página, pode usar o IPC. */
 function trusted(e: IpcMainInvokeEvent): boolean {
@@ -962,7 +966,7 @@ app.whenReady().then(() => {
       .filter((w): w is BrowserWindow => !!w && !w.isDestroyed())
       .map((w) => w.getMediaSourceId().split(':').slice(0, 2).join(':') + ':');
     return sources
-      .filter((s) => s.name !== 'AriranhaCast' && !own.some((p) => s.id.startsWith(p)))
+      .filter((s) => s.name !== 'AriranhaCast' && !own.some((p) => s.id.startsWith(p)) && !(s.id.startsWith('window:') && HIDDEN_WINDOWS.test(s.name)))
       .map((s) => ({
         id: s.id,
         name: s.name,
