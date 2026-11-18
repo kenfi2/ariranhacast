@@ -84,6 +84,7 @@ export interface OverlayConfig {
 export interface OverlayRow {
   name: string;
   color: string;
+  avatar: string; // foto da conta ('' = inicial)
   speaking: boolean;
   muted: boolean;
 }

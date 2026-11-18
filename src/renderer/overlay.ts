@@ -1,5 +1,5 @@
 // Janela transparente por cima do jogo: mostra quem está falando. Só exibe; não recebe cliques.
-interface Row { name: string; color: string; speaking: boolean; muted: boolean }
+interface Row { name: string; color: string; avatar?: string; speaking: boolean; muted: boolean }
 interface Cfg { corner: string; mode: 'speaking' | 'all' }
 const api = (window as unknown as { overlay: { onRows(cb: (r: Row[]) => void): void; onConfig(cb: (c: Cfg) => void): void } }).overlay;
 const list = document.getElementById('list')!;
@@ -17,6 +17,15 @@ function render(): void {
     dot.className = 'dot';
     dot.style.setProperty('--c', r.color);
     dot.textContent = (r.name[0] ?? '?').toUpperCase();
+    if (r.avatar) {
+      // Foto da conta por cima da inicial; se não carregar, fica a inicial.
+      const img = document.createElement('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.onerror = () => img.remove();
+      img.src = r.avatar;
+      dot.append(img);
+    }
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = r.name;

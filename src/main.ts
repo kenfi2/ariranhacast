@@ -526,7 +526,7 @@ function updateOverlay(): void {
  * reconhecer jogos e vídeos em tela cheia (barra de tarefas aparecendo, perda de fluidez). Por isso
  * só fica visível enquanto há algo para mostrar; com ninguém falando, ela some de verdade.
  */
-let overlayRows: { name: string; color: string; speaking: boolean; muted: boolean }[] = [];
+let overlayRows: { name: string; color: string; avatar: string; speaking: boolean; muted: boolean }[] = [];
 // Mostrar/esconder uma janela "sempre por cima" mexe com o Explorer (Alt+Tab, barra de tarefas). Fazer
 // isso a cada vez que alguém começa/para de falar deixava o Windows lento numa conversa longa. Agora a
 // janela aparece na hora, mas só some depois de um tempo sem ninguém falar.
@@ -1206,7 +1206,8 @@ app.whenReady().then(() => {
     if (!trusted(e as unknown as IpcMainInvokeEvent) || !Array.isArray(rows)) return;
     const clean = rows.slice(0, 16).map((r) => ({
       name: String(r?.name ?? '').replace(/[\p{Cc}\p{Cf}]/gu, '').slice(0, 24),
-      color: /^#[0-9a-f]{6}$/i.test(String(r?.color)) ? String(r.color) : '#7c8cff',
+      color: /^#[0-9a-f]{6}$/i.test(String(r?.color)) || /^hsl\(\d{1,3} \d{1,3}% \d{1,3}%\)$/.test(String(r?.color)) ? String(r.color) : '#7c8cff',
+      avatar: cleanAvatar(r?.avatar) ?? '',
       speaking: r?.speaking === true,
       muted: r?.muted === true,
     }));
