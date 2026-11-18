@@ -977,6 +977,16 @@ function needsLogin(): boolean {
   return lobbyOn() && !lobbyState.user;
 }
 
+const SPEAKER_ICON = '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>';
+const TOOL_ICON = {
+  stats: '<path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  fullscreen: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+  exitFullscreen: '<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/>',
+  stop: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/>',
+  mute: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7M4 4l16 16"/>',
+  kick: '<circle cx="9.5" cy="8" r="3.5"/><path d="M3 20a6.5 6.5 0 0 1 13 0M17 8.5l4 4M21 8.5l-4 4"/>',
+};
 const LOCK_ICON = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
 const ME_ICON = '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.4-3.8 4.2-5.8 7.5-5.8s6.1 2 7.5 5.8"/>';
 
@@ -1050,6 +1060,7 @@ function publishLobby(): void {
       count: Math.max(1, room.roster.length),
       max: room.limit,
       members: room.roster.map((p) => p.name),
+      people: room.roster.map((p) => ({ name: p.name, avatar: p.avatar || null })),
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
       quiet: roomQuiet,
@@ -1084,16 +1095,17 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   const people = el('div', 'lr-people');
   people.title = r.members.join('\n');
   // Quem hospeda já aparece com a foto logo acima: as bolinhas mostram só os outros.
-  const names = [...r.members];
-  const hostAt = names.indexOf(r.host.name);
-  if (hostAt >= 0) names.splice(hostAt, 1);
-  people.hidden = !names.length;
-  for (const n of names.slice(0, 6)) {
-    const b = el('span', 'lr-dot', (n.trim()[0] ?? '?').toUpperCase());
-    b.style.background = color(n);
+  // `people` traz a foto da conta; salas de apps antigos só mandam os nomes.
+  const others = r.people.length ? [...r.people] : r.members.map((name) => ({ name, avatar: null as string | null }));
+  const hostAt = others.findIndex((p) => p.name === r.host.name);
+  if (hostAt >= 0) others.splice(hostAt, 1);
+  people.hidden = !others.length;
+  for (const p of others.slice(0, 6)) {
+    const b = avatar({ id: p.name, name: p.name, avatar: p.avatar }, 'lr-dot');
+    b.title = p.name;
     people.append(b);
   }
-  if (names.length > 6) people.append(el('span', 'lr-dot more', `+${names.length - 6}`));
+  if (others.length > 6) people.append(el('span', 'lr-dot more', `+${others.length - 6}`));
   main.append(title, sub, people);
   // Servidores do Discord em comum com quem hospeda.
   const shared = r.guilds.map((id) => lobbyState.guilds.find((g) => g.id === id)).filter((g): g is NonNullable<typeof g> => !!g);
@@ -1252,9 +1264,11 @@ function startLogin(provider: string): void {
 function syncPresence(): void {
   if (!lobbyOn()) return;
   const code = room?.code ?? null;
-  if (code === sentPresence) return;
-  sentPresence = code;
-  void window.ariranhacast.lobbyPresence(code);
+  const live = !!room?.roster.find((p) => p.id === room!.selfId)?.screen;
+  const key = `${code}|${live}`;
+  if (key === sentPresence) return;
+  sentPresence = key;
+  void window.ariranhacast.lobbyPresence(code, live);
 }
 
 /**
@@ -1277,11 +1291,14 @@ function renderOnline(): void {
         b.classList.toggle('on', personFilter === o.id);
         b.classList.toggle('in-room', !!o.room);
         const r = o.room ? lobbyState.rooms.find((x) => x.code === o.room) : undefined;
-        const where = o.room ? (room?.code === o.room ? 'na sua sala' : r ? `na sala ${r.name}` : 'numa sala') : 'na tela inicial';
+        const where = o.live ? (room?.code === o.room ? 'transmitindo na sua sala' : r ? `transmitindo na sala ${r.name}` : 'transmitindo') : o.room ? (room?.code === o.room ? 'na sua sala' : r ? `na sala ${r.name}` : 'numa sala') : 'na tela inicial';
         const dev = o.devices.includes('android') ? (o.devices.includes('pc') ? ' · PC e celular' : ' · celular') : '';
         b.title = `${o.name}\n${where}${dev}${o.room ? '\nClique para ver a sala' : ''}`;
-        b.append(avatar(o, 'friend-av'), el('i', 'online-dot'));
-        if (o.room) b.append(el('span', 'friend-live', '●'));
+        b.append(avatar(o, 'friend-av'));
+        // Um selo só: tela = transmitindo, alto-falante = em call, bolinha = online na tela inicial.
+        if (o.live) b.insertAdjacentHTML('beforeend', `<span class="friend-badge" title="Transmitindo">${svg(ICON.screen)}</span>`);
+        else if (o.room) b.insertAdjacentHTML('beforeend', `<span class="friend-badge" title="Em call">${svg(SPEAKER_ICON)}</span>`);
+        else b.append(el('i', 'online-dot'));
         b.onclick = () => {
           if (!o.room) return;
           personFilter = personFilter === o.id ? '' : o.id;
@@ -1447,9 +1464,19 @@ function makeTile(key: string, kind: 'user' | 'screen'): Tile {
     focusKey = focusKey === key ? '' : key;
     applyFocus();
   };
-  root.ondblclick = () => {
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void root.requestFullscreen();
+  root.ondblclick = () => toggleFullscreen(root);
+  // Mouse parado por 2,5 s em cima do cartão: some o cursor e os botões (como num player de vídeo).
+  let idle = 0;
+  const wake = () => {
+    root.classList.remove('idle');
+    clearTimeout(idle);
+    idle = window.setTimeout(() => root.classList.add('idle'), 2500);
+  };
+  root.onmousemove = wake;
+  root.onmouseenter = wake;
+  root.onmouseleave = () => {
+    clearTimeout(idle);
+    root.classList.remove('idle');
   };
   $('stage').append(root);
   const tile: Tile = { root, video, body, tag, tools, stats, mode: '' };
@@ -1466,10 +1493,21 @@ function setVideo(tile: Tile, stream: MediaStream | undefined, muted: boolean): 
   tile.video.hidden = !stream;
 }
 
-function toolButton(text: string, onclick: () => void): HTMLButtonElement {
-  const b = el('button', '', text);
+/** Botão redondo só com ícone (o texto vira dica ao passar o mouse). */
+function toolButton(text: string, icon: string, onclick: () => void, cls = ''): HTMLButtonElement {
+  const b = el('button', `tool ${cls}`.trim());
+  b.type = 'button';
+  b.title = text;
+  b.setAttribute('aria-label', text);
+  b.innerHTML = svg(icon);
   b.onclick = onclick;
   return b;
+}
+
+/** Tela cheia num cartão: entra, ou sai se ele já está em tela cheia. */
+function toggleFullscreen(root: HTMLElement): void {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void root.requestFullscreen();
 }
 
 function renderTiles(): void {
@@ -1504,8 +1542,8 @@ function renderTiles(): void {
       ut.tools.replaceChildren();
       if (room.isHost && p.id !== me) {
         ut.tools.append(
-          toolButton('Silenciar', () => room?.muteMember(p.id)),
-          toolButton('Remover', () => room?.kick(p.id)),
+          toolButton('Silenciar para todos', TOOL_ICON.mute, () => room?.muteMember(p.id)),
+          toolButton('Remover da sala', TOOL_ICON.kick, () => room?.kick(p.id), 'danger'),
         );
       }
     }
@@ -1555,19 +1593,25 @@ function renderTiles(): void {
           w!.watch.setQuality(q.value as Quality);
           if (w!.watch.via !== 'direto') toast('Você recebe esta transmissão por outra pessoa da sala (relay); a qualidade segue a dela.');
         };
+        const volBox = el('label', 'tool-vol');
+        volBox.title = 'Volume da transmissão';
+        volBox.innerHTML = svg(SPEAKER_ICON);
+        volBox.append(vol);
+        const stats = toolButton('Estatísticas', TOOL_ICON.stats, () => {
+          w!.statsOn = !w!.statsOn;
+          st.stats.hidden = !w!.statsOn;
+          stats.classList.toggle('on', w!.statsOn);
+        });
         st.tools.append(
-          vol,
+          volBox,
           q,
-          toolButton('Estatísticas', () => {
-            w!.statsOn = !w!.statsOn;
-            st.stats.hidden = !w!.statsOn;
-          }),
-          toolButton('Grade', () => {
+          stats,
+          toolButton('Voltar para a grade', TOOL_ICON.grid, () => {
             focusKey = '';
             applyFocus();
           }),
-          toolButton('Tela cheia', () => void st.root.requestFullscreen()),
-          toolButton('Parar de assistir', () => quitWatch(p.id)),
+          toolButton('Tela cheia (duplo clique também)', TOOL_ICON.fullscreen, () => toggleFullscreen(st.root), 'fs'),
+          toolButton('Parar de assistir', TOOL_ICON.stop, () => quitWatch(p.id), 'danger'),
         );
       }
     }
@@ -1639,7 +1683,16 @@ function pushOverlay(): void {
   window.ariranhacast.pushOverlay(rows);
 }
 
-document.addEventListener('fullscreenchange', () => document.body.classList.toggle('fullscreen', !!document.fullscreenElement));
+document.addEventListener('fullscreenchange', () => {
+  const on = !!document.fullscreenElement;
+  document.body.classList.toggle('fullscreen', on);
+  // O botão de tela cheia vira "sair da tela cheia" no cartão que está em tela cheia.
+  for (const b of document.querySelectorAll<HTMLButtonElement>('.tile .tool.fs')) {
+    const mine = on && b.closest('.tile') === document.fullscreenElement;
+    b.innerHTML = svg(mine ? TOOL_ICON.exitFullscreen : TOOL_ICON.fullscreen);
+    b.title = mine ? 'Sair da tela cheia' : 'Tela cheia (duplo clique também)';
+  }
+});
 
 // ---------- assistir ----------
 function startWatch(id: string): void {

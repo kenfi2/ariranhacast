@@ -4,7 +4,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { LobbyClient, type PublishedRoom, type Session } from './shared/lobby';
+import { cleanAvatar, LobbyClient, type PublishedRoom, type Session } from './shared/lobby';
 
 const dev = !app.isPackaged;
 
@@ -609,6 +609,9 @@ function cleanPublished(raw: unknown): PublishedRoom | null {
     count: Math.max(1, int(r.count, 50)),
     max: Number.isInteger(r.max) ? Math.min(50, Math.max(2, r.max as number)) : 16,
     members: Array.isArray(r.members) ? r.members.slice(0, 20).map((m) => text(m, 24)).filter(Boolean) : [],
+    people: Array.isArray(r.people)
+      ? r.people.slice(0, 20).map((p: any) => ({ name: text(p?.name, 24), avatar: cleanAvatar(p?.avatar) })).filter((p) => p.name)
+      : [],
     live: int(r.live, 16),
     proto: int(r.proto, 1000),
     quiet: r.quiet === true,
@@ -1167,7 +1170,7 @@ app.whenReady().then(() => {
   });
   handle('lc:lobby-logout', () => lobby.logout());
   handle('lc:lobby-publish', (room: unknown) => lobby.publish(room === null ? null : cleanPublished(room)));
-  handle('lc:lobby-presence', (code: unknown) => lobby.setPresence(typeof code === 'string' && CODE_RE.test(code) ? code.toUpperCase() : null, 'pc'));
+  handle('lc:lobby-presence', (code: unknown, live: unknown) => lobby.setPresence(typeof code === 'string' && CODE_RE.test(code) ? code.toUpperCase() : null, 'pc', live === true));
   handle('lc:deeplink-pending', () => {
     const c = deepLink;
     deepLink = '';

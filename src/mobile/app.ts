@@ -220,7 +220,7 @@ function avatar(user: { id: string; name: string; avatar: string | null }, cls: 
 
 function publishLobby(): void {
   if (!lobbyOn()) return;
-  lobby.setPresence(room?.code ?? null, 'android'); // aparece no "Online agora" de quem tem servidor em comum
+  lobby.setPresence(room?.code ?? null, 'android', !!room?.roster.find((p) => p.id === room!.selfId)?.screen); // aparece no "Online agora" de quem tem servidor em comum
   let data: PublishedRoom | null = null;
   if (room?.isHost && room.code) {
     data = {
@@ -230,6 +230,7 @@ function publishLobby(): void {
       count: Math.max(1, room.roster.length),
       max: room.limit,
       members: room.roster.map((p) => p.name),
+      people: room.roster.map((p) => ({ name: p.name, avatar: p.avatar || null })),
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
     };

@@ -29,6 +29,7 @@ export type Online = {
   name: string;
   avatar: string | null;
   room: string | null; // código da sala em que está, ou null (na tela inicial)
+  live: boolean; // transmitindo a tela
   devices: string[]; // "pc", "android"
   guilds: string[]; // servidores em comum
 };
@@ -41,7 +42,8 @@ export type Room = {
   host: User;
   count: number; // pessoas na sala
   max: number; // limite de pessoas escolhido por quem criou a sala
-  members: string[]; // nomes
+  members: string[]; // nomes (apps antigos)
+  people: { name: string; avatar: string | null }[]; // quem está, com a foto da conta
   live: number; // quantas transmissões ao vivo
   proto: number; // versão do protocolo da sala (app incompatível vê aviso)
   guilds?: string[]; // servidores do Discord em comum entre quem hospeda e quem vê (calculado por pessoa)

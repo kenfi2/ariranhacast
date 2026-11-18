@@ -102,7 +102,7 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   lobbyLogin: (provider: string) => ipcRenderer.invoke('lc:lobby-login', provider),
   lobbyLogout: () => ipcRenderer.invoke('lc:lobby-logout'),
   lobbyPublish: (room: unknown) => ipcRenderer.invoke('lc:lobby-publish', room),
-  lobbyPresence: (code: string | null) => ipcRenderer.invoke('lc:lobby-presence', code),
+  lobbyPresence: (code: string | null, live: boolean) => ipcRenderer.invoke('lc:lobby-presence', code, live === true),
   onLobby: (cb: (s: unknown) => void) => on('lc:lobby', cb),
   onLobbyError: (cb: (text: string) => void) => on('lc:lobby-error', cb),
 });

@@ -23,11 +23,18 @@ export interface LobbyRoom {
   /** Limite de pessoas da sala. */
   max: number;
   members: string[];
+  /** Quem está na sala, com a foto da conta (null = sem foto, mostra a inicial). */
+  people: RoomPerson[];
   live: number;
   proto: number;
   createdAt: number;
   /** Servidores do Discord em comum entre você e quem hospeda (ids; nomes em LobbyState.guilds). */
   guilds: string[];
+}
+
+export interface RoomPerson {
+  name: string;
+  avatar: string | null;
 }
 
 /** Alguém online agora que tem servidor do Discord em comum com você. */
@@ -36,6 +43,7 @@ export interface LobbyOnline {
   name: string;
   avatar: string | null;
   room: string | null; // sala em que está (código) ou null
+  live: boolean; // transmitindo a tela
   devices: string[]; // "pc", "android"
   guilds: string[];
 }
@@ -60,6 +68,7 @@ export interface PublishedRoom {
   count: number;
   max: number;
   members: string[];
+  people: RoomPerson[];
   live: number;
   proto: number;
   /** Não avisar no canal do Discord (webhook) quando a sala abrir. */
@@ -101,7 +110,7 @@ const CODE_RE = /^[A-Z0-9]{4,16}$/;
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, max) : '');
 const int = (v: unknown, min: number, max: number) => (Number.isInteger(v) ? Math.min(max, Math.max(min, v as number)) : min);
 
-function cleanAvatar(v: unknown): string | null {
+export function cleanAvatar(v: unknown): string | null {
   if (typeof v !== 'string' || v.length > 500) return null;
   try {
     const u = new URL(v);
@@ -131,6 +140,9 @@ function cleanRoom(raw: unknown): LobbyRoom | null {
     count: int(r?.count, 1, 50),
     max: r?.max === undefined ? 16 : int(r?.max, 2, 50),
     members: Array.isArray(r?.members) ? (r.members as unknown[]).slice(0, 20).map((m) => str(m, 24)).filter(Boolean) : [],
+    people: Array.isArray(r?.people)
+      ? (r.people as any[]).slice(0, 20).map((p) => ({ name: str(p?.name, 24), avatar: cleanAvatar(p?.avatar) })).filter((p) => p.name)
+      : [],
     live: int(r?.live, 0, 16),
     proto: int(r?.proto, 0, 1000),
     createdAt: Number.isFinite(r?.createdAt) ? Number(r!.createdAt) : 0,
@@ -148,6 +160,7 @@ function cleanOnline(raw: unknown): LobbyOnline | null {
     name: user.name,
     avatar: user.avatar,
     room: CODE_RE.test(room) ? room : null,
+    live: CODE_RE.test(room) && o?.live === true,
     devices: Array.isArray(o?.devices) ? (o.devices as unknown[]).filter((d): d is string => d === 'pc' || d === 'android') : [],
     guilds: Array.isArray(o?.guilds) ? (o.guilds as unknown[]).slice(0, 10).filter((g): g is string => typeof g === 'string' && /^\d{5,25}$/.test(g)) : [],
   };
@@ -185,7 +198,7 @@ export class LobbyClient {
   private pendingState: { value: string; until: number } | null = null;
   private hosting: PublishedRoom | null = null;
   private lastSent = '';
-  private presence: { room: string | null; device: 'pc' | 'android' } = { room: null, device: 'pc' };
+  private presence: { room: string | null; device: 'pc' | 'android'; live: boolean } = { room: null, device: 'pc', live: false };
   private lastPresence = '';
 
   constructor(
@@ -271,8 +284,9 @@ export class LobbyClient {
   }
 
   /** Em que sala esta pessoa está agora (null = nenhuma). Aparece em "Online agora" para quem tem servidor em comum. */
-  setPresence(room: string | null, device: 'pc' | 'android'): void {
-    this.presence = { room: room && CODE_RE.test(room) ? room : null, device };
+  setPresence(room: string | null, device: 'pc' | 'android', live = false): void {
+    const at = room && CODE_RE.test(room) ? room : null;
+    this.presence = { room: at, device, live: !!at && live };
     const msg = JSON.stringify({ type: 'presence', ...this.presence });
     if (msg === this.lastPresence) return;
     if (this.send(msg)) this.lastPresence = msg;
@@ -347,7 +361,7 @@ export class LobbyClient {
       this.set({ status: 'online' });
       this.pingTimer = setInterval(() => ws.readyState === ws.OPEN && ws.send('ping'), 25_000);
       this.lastPresence = '';
-      this.setPresence(this.presence.room, this.presence.device);
+      this.setPresence(this.presence.room, this.presence.device, this.presence.live);
       if (this.hosting) this.publish(this.hosting);
     };
     ws.onmessage = (e) => {

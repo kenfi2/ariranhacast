@@ -53,7 +53,7 @@ export interface AriranhaBridge {
   lobbyLogin(provider: string): Promise<boolean>;
   lobbyLogout(): Promise<void>;
   lobbyPublish(room: PublishedRoom | null): Promise<void>;
-  lobbyPresence(code: string | null): Promise<void>;
+  lobbyPresence(code: string | null, live: boolean): Promise<void>;
   onLobby(cb: (s: LobbyState) => void): void;
   onLobbyError(cb: (text: string) => void): void;
 }
