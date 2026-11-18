@@ -17,6 +17,11 @@ window.ariranhacast.onGameCap((s: GameCapState) => {
   onLost(why);
 });
 
+/** Captura de janela/tela sem o cursor (pelo gamecap.exe, sem hook). */
+export async function noCursorAvailable(): Promise<boolean> {
+  return typeof (window as any).MediaStreamTrackGenerator === 'function' && (await window.ariranhacast.noCursorAvailable().catch(() => false));
+}
+
 export async function gameCaptureAvailable(): Promise<boolean> {
   return typeof (window as any).MediaStreamTrackGenerator === 'function' && (await window.ariranhacast.gameCapAvailable().catch(() => false));
 }
@@ -30,9 +35,10 @@ export async function startGameCapture(
   fps: number,
   height: number,
   lost: (reason: string) => void,
+  mode: 'hook' | 'plain' = 'hook',
 ): Promise<{ track: MediaStreamTrack } | { error: string }> {
   stopGameCapture();
-  if (source.kind !== 'window') return { error: 'só funciona com janelas' };
+  if (mode === 'hook' && source.kind !== 'window') return { error: 'só funciona com janelas' };
 
   const generator = new MediaStreamTrackGenerator({ kind: 'video' });
   const writer = generator.writable.getWriter();
@@ -49,7 +55,7 @@ export async function startGameCapture(
       resolve(e.ports[0]);
     };
     window.addEventListener('message', onMsg);
-    pending = window.ariranhacast.gameCapStart(source.id, fps, height);
+    pending = window.ariranhacast.gameCapStart(source.id, fps, height, mode);
   });
   const result = await pending;
   if (!port || !result.ok) {

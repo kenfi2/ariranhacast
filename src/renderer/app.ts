@@ -7,7 +7,7 @@ import { ClipBuffer } from './clips';
 import { measurePc, type Route } from './link';
 import { describeNetwork, probeNetwork, type NetInfo } from './netcheck';
 import { hasTurn, loadIce, net, normalizeCode } from './signaling';
-import { gameCaptureAvailable, isGameCaptureTrack, startGameCapture, stopGameCapture } from './gamecap';
+import { gameCaptureAvailable, isGameCaptureTrack, noCursorAvailable, startGameCapture, stopGameCapture } from './gamecap';
 import type { LobbyRoom, LobbyState, PublishedRoom } from '../shared/lobby';
 import type { CodecChoice, EncodeOpts, GfxConfig, OverlayRow, Quality, RosterEntry, Settings, SourceInfo, UpdaterState } from './types';
 import { Voice, type NsMode } from './voice';
@@ -1801,6 +1801,12 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('.share-tabs button
   box.onchange = () => localStorage.setItem('ariranhacast.gamecap', box.checked ? '1' : '0');
   void gameCaptureAvailable().then((ok) => ($('gamecap-row').hidden = !ok));
 }
+{
+  const box = $<HTMLInputElement>('opt-cursor');
+  box.checked = localStorage.getItem('ariranhacast.cursor') === '1';
+  box.onchange = () => localStorage.setItem('ariranhacast.cursor', box.checked ? '1' : '0');
+  void noCursorAvailable().then((ok) => ($('cursor-row').hidden = !ok));
+}
 $('btn-share-cancel').onclick = () => $<HTMLDialogElement>('dlg-share').close();
 // Enquanto a transmissão está começando, Esc não fecha a janela (senão parece que nada aconteceu).
 $('dlg-share').addEventListener('cancel', (e) => {
@@ -1945,6 +1951,37 @@ async function capture(source: SourceInfo, height: number, fps: number, audio: A
     note += (note ? ' ' : '') + `Captura de jogo indisponível (${g.error}); usando a captura de janela.`;
   }
 
+  // Sem o cursor do mouse (padrão): o Chromium sempre desenha o cursor nas capturas dele, então a
+  // janela/tela vem pelo gamecap.exe (Windows Graphics Capture / Desktop Duplication).
+  if (!cursorOn() && (await noCursorAvailable())) {
+    let plainTrack: MediaStreamTrack | null = null;
+    const g = await startGameCapture(
+      source,
+      fps,
+      height,
+      (why) => {
+        if (plainTrack && localScreen?.getVideoTracks().includes(plainTrack)) {
+          stopShare();
+          toast(`A captura terminou (${why}).`);
+        }
+      },
+      'plain',
+    );
+    if ('track' in g) {
+      plainTrack = g.track;
+      const stream = new MediaStream([g.track]);
+      if (appTrack) stream.addTrack(appTrack);
+      else if (system) {
+        const sys = await systemAudioOnly().catch(() => null);
+        if (sys) stream.addTrack(sys);
+        else note += (note ? ' ' : '') + 'O sistema não entregou áudio para esta captura.';
+      }
+      applyHints(stream, mode);
+      return { stream, note };
+    }
+    note += (note ? ' ' : '') + `Não deu para capturar sem o cursor (${g.error}); o cursor vai aparecer.`;
+  }
+
   await window.ariranhacast.selectSource(source.id, system);
   const video: MediaTrackConstraints = { frameRate: { ideal: fps, max: fps } };
   if (height) {
@@ -1977,6 +2014,7 @@ async function capture(source: SourceInfo, height: number, fps: number, audio: A
 }
 
 const gameCapOn = (): boolean => localStorage.getItem('ariranhacast.gamecap') === '1';
+const cursorOn = (): boolean => localStorage.getItem('ariranhacast.cursor') === '1';
 
 /** Áudio do sistema inteiro (menos o próprio app), sem vídeo: para a captura de jogo quando o áudio por aplicativo não deu. */
 async function systemAudioOnly(): Promise<MediaStreamTrack | null> {

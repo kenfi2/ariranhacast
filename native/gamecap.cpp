@@ -13,9 +13,16 @@
 //
 //   gamecap --hwnd <HWND> --parent <PID> [--fps 60] [--height 1080] [--obs <pasta>]
 //
+// Também faz a captura normal (sem hook) SEM o cursor do mouse, pelo mesmo caminho de texturas:
+//   gamecap --mode window --hwnd <HWND> --parent <PID> ...   janela, pelo Windows Graphics Capture
+//                                                            (cursor e borda amarela desligados)
+//   gamecap --mode screen --point <x>,<y> --parent <PID> ... monitor que contém o ponto (pixels
+//                                                            físicos), pelo Desktop Duplication (não
+//                                                            inclui o cursor)
+//
 // stdout, uma mensagem por linha:
 //   LOG <texto>                         diagnóstico (inclui o log do próprio hook)
-//   HOOKED <largura> <altura> <tipo>    o jogo está sendo capturado (tipo: textura | memoria)
+//   HOOKED <largura> <altura> <tipo>    capturando (tipo: textura | memoria | janela | tela)
 //   TEX <ger> <i> <handle> <w> <h>      textura i da geração ger; handle já vale no processo pai
 //   FRAME <ger> <i> <us>                quadro pronto na textura i (us = instante em microssegundos)
 //   LOST <motivo>                       o jogo fechou ou parou de ser capturado
@@ -30,6 +37,7 @@
 #include <shellapi.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <inspectable.h>
 #include <mmsystem.h>
 #include <ctype.h>
 #include <inttypes.h>
@@ -139,6 +147,10 @@ static bool g_is64 = true;
 static int g_fps = 60;
 static int g_max_h = 0;
 static wchar_t g_obs_dir[MAX_PATH] = L"";
+enum Mode { MODE_HOOK, MODE_WINDOW, MODE_SCREEN };
+static Mode g_mode = MODE_HOOK;
+static POINT g_point = {0, 0};  // --mode screen: um ponto do monitor (pixels físicos)
+static IDXGIAdapter1* g_adapter = nullptr;  // --mode screen: a placa de vídeo ligada ao monitor
 static HANDLE g_parent = nullptr;    // processo do AriranhaCast (para duplicar/fechar handles nele)
 static HANDLE g_target = nullptr;    // processo do jogo
 static volatile LONG g_quit = 0;
@@ -222,10 +234,12 @@ float4 ps(V i) : SV_TARGET {
 
 static void init_d3d() {
   const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
-  HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 4,
+  // Desktop Duplication exige o dispositivo na placa de vídeo do monitor.
+  const D3D_DRIVER_TYPE type = g_adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+  HRESULT hr = D3D11CreateDevice(g_adapter, type, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 4,
                                  D3D11_SDK_VERSION, &g_dev, nullptr, &g_ctx);
   if (FAILED(hr))  // sem 11.1 (Windows 7/placas antigas) o pedido com 11_1 falha com E_INVALIDARG
-    hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels + 1, 3,
+    hr = D3D11CreateDevice(g_adapter, type, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels + 1, 3,
                            D3D11_SDK_VERSION, &g_dev, nullptr, &g_ctx);
   if (FAILED(hr)) die(10, "d3d11", "0x%08lx", (unsigned long)hr);
 
@@ -741,6 +755,361 @@ static void check_target() {
   LOG("alvo %s pid %lu %s", exe, g_pid, g_is64 ? "64 bits" : "32 bits");
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Captura sem cursor (sem hook): janela pelo Windows Graphics Capture, tela pelo Desktop
+// Duplication. O Chromium sempre desenha o cursor por cima das capturas dele; aqui o quadro chega
+// limpo e segue pelo mesmo anel de texturas da captura de jogo.
+//
+// Interfaces WinRT declaradas à mão (o MinGW do zig não traz windows.graphics.capture.h). UUIDs e
+// ordem dos métodos conferidos com windows.graphics.capture.idl do mingw-w64.
+struct SizeInt32 { int32_t Width, Height; };
+struct IGraphicsCaptureSession;
+struct IDirect3D11CaptureFrame : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE get_Surface(IInspectable** v) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_SystemRelativeTime(int64_t* v) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_ContentSize(SizeInt32* v) = 0;
+};
+struct IGraphicsCaptureItem : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE get_DisplayName(void** v) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_Size(SizeInt32* v) = 0;
+  virtual HRESULT STDMETHODCALLTYPE add_Closed(void* h, int64_t* token) = 0;
+  virtual HRESULT STDMETHODCALLTYPE remove_Closed(int64_t token) = 0;
+};
+struct IDirect3D11CaptureFramePool : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE Recreate(IInspectable* device, int32_t format, int32_t buffers, SizeInt32 size) = 0;
+  virtual HRESULT STDMETHODCALLTYPE TryGetNextFrame(IDirect3D11CaptureFrame** frame) = 0;
+  virtual HRESULT STDMETHODCALLTYPE add_FrameArrived(void* h, int64_t* token) = 0;
+  virtual HRESULT STDMETHODCALLTYPE remove_FrameArrived(int64_t token) = 0;
+  virtual HRESULT STDMETHODCALLTYPE CreateCaptureSession(IGraphicsCaptureItem* item, IGraphicsCaptureSession** session) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_DispatcherQueue(void** v) = 0;
+};
+struct IDirect3D11CaptureFramePoolStatics2 : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE CreateFreeThreaded(IInspectable* device, int32_t format, int32_t buffers, SizeInt32 size,
+                                                       IDirect3D11CaptureFramePool** pool) = 0;
+};
+struct IGraphicsCaptureSession : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE StartCapture() = 0;
+};
+struct IGraphicsCaptureSession2 : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE get_IsCursorCaptureEnabled(boolean* v) = 0;
+  virtual HRESULT STDMETHODCALLTYPE put_IsCursorCaptureEnabled(boolean v) = 0;
+};
+struct IGraphicsCaptureSession3 : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE get_IsBorderRequired(boolean* v) = 0;
+  virtual HRESULT STDMETHODCALLTYPE put_IsBorderRequired(boolean v) = 0;
+};
+struct IGraphicsCaptureItemInterop : IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE CreateForWindow(HWND window, REFIID riid, void** result) = 0;
+  virtual HRESULT STDMETHODCALLTYPE CreateForMonitor(HMONITOR monitor, REFIID riid, void** result) = 0;
+};
+struct IDirect3DDxgiInterfaceAccess : IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE GetInterface(REFIID iid, void** p) = 0;
+};
+struct IClosable : IInspectable {
+  virtual HRESULT STDMETHODCALLTYPE Close() = 0;
+};
+
+static const GUID IID_IGraphicsCaptureItem_ = {0x79c3f95b, 0x31f7, 0x4ec2, {0xa4, 0x64, 0x63, 0x2e, 0xf5, 0xd3, 0x07, 0x60}};
+static const GUID IID_IGraphicsCaptureItemInterop_ = {0x3628e81b, 0x3cac, 0x4c60, {0xb7, 0xf4, 0x23, 0xce, 0x0e, 0x0c, 0x33, 0x56}};
+static const GUID IID_IDirect3D11CaptureFramePoolStatics2_ = {0x589b103f, 0x6bbc, 0x5df5, {0xa9, 0x91, 0x02, 0xe2, 0x8b, 0x3b, 0x66, 0xd5}};
+static const GUID IID_IGraphicsCaptureSession2_ = {0x2c39ae40, 0x7d2e, 0x5044, {0x80, 0x4e, 0x8b, 0x67, 0x99, 0xd4, 0xcf, 0x9e}};
+static const GUID IID_IGraphicsCaptureSession3_ = {0xf2cdd966, 0x22ae, 0x5ea1, {0x95, 0x96, 0x3a, 0x28, 0x93, 0x44, 0xc3, 0xbe}};
+static const GUID IID_IDirect3DDxgiInterfaceAccess_ = {0xa9b3d012, 0x3df2, 0x4ee3, {0xb8, 0xd1, 0x86, 0x95, 0xf4, 0x57, 0xd3, 0xc1}};
+static const GUID IID_IClosable_ = {0x30d5a829, 0x7fa4, 0x4026, {0x83, 0xbb, 0xd7, 0x5b, 0xae, 0x4e, 0xa9, 0x9e}};
+static const int32_t PIXEL_B8G8R8A8 = 87;  // DirectXPixelFormat.B8G8R8A8UIntNormalized
+
+typedef HRESULT(WINAPI* PFN_RoInitialize)(int);
+typedef HRESULT(WINAPI* PFN_WindowsCreateString)(const wchar_t*, UINT32, void**);
+typedef HRESULT(WINAPI* PFN_WindowsDeleteString)(void*);
+typedef HRESULT(WINAPI* PFN_RoGetActivationFactory)(void*, REFIID, void**);
+typedef HRESULT(WINAPI* PFN_CreateD3DDevice)(IDXGIDevice*, IInspectable**);
+
+static IGraphicsCaptureItem* w_item = nullptr;
+static IDirect3D11CaptureFramePool* w_pool = nullptr;
+static IGraphicsCaptureSession* w_session = nullptr;
+static IInspectable* w_device = nullptr;
+static SizeInt32 w_size = {0, 0};
+static IDXGIOutputDuplication* d_dup = nullptr;
+static IDXGIOutput1* d_output = nullptr;
+static int g_src_w = 0, g_src_h = 0;
+
+static void close_winrt(IInspectable* p) {
+  if (!p) return;
+  IClosable* c = nullptr;
+  if (SUCCEEDED(p->QueryInterface(IID_IClosable_, (void**)&c)) && c) {
+    c->Close();
+    c->Release();
+  }
+}
+
+/** Fonte própria (cópia do quadro capturado) no tamanho w×h. */
+static bool ensure_src(int w, int h) {
+  if (g_src && g_src_w == w && g_src_h == h) return true;
+  release_src();
+  D3D11_TEXTURE2D_DESC td = {};
+  td.Width = (UINT)w;
+  td.Height = (UINT)h;
+  td.MipLevels = td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_DEFAULT;
+  td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+  if (FAILED(g_dev->CreateTexture2D(&td, nullptr, &g_src))) return false;
+  if (!make_srv(DXGI_FORMAT_B8G8R8A8_UNORM)) return false;
+  g_src_w = w;
+  g_src_h = h;
+  g_flip = false;
+  int ow, oh;
+  fit_size((uint32_t)w, (uint32_t)h, &ow, &oh);
+  make_slots(ow, oh);
+  return true;
+}
+
+static void start_window_capture() {
+  HMODULE combase = LoadLibraryExW(L"combase.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  HMODULE d3d = GetModuleHandleW(L"d3d11.dll");
+  auto roInit = combase ? (PFN_RoInitialize)GetProcAddress(combase, "RoInitialize") : nullptr;
+  auto mkStr = combase ? (PFN_WindowsCreateString)GetProcAddress(combase, "WindowsCreateString") : nullptr;
+  auto delStr = combase ? (PFN_WindowsDeleteString)GetProcAddress(combase, "WindowsDeleteString") : nullptr;
+  auto factory = combase ? (PFN_RoGetActivationFactory)GetProcAddress(combase, "RoGetActivationFactory") : nullptr;
+  auto mkDevice = d3d ? (PFN_CreateD3DDevice)GetProcAddress(d3d, "CreateDirect3D11DeviceFromDXGIDevice") : nullptr;
+  if (!roInit || !mkStr || !delStr || !factory || !mkDevice) die(40, "wgc", "Windows sem Graphics Capture");
+  roInit(1 /* RO_INIT_MULTITHREADED */);
+
+  auto get_factory = [&](const wchar_t* cls, REFIID iid, void** outp) -> HRESULT {
+    void* name = nullptr;
+    HRESULT hr = mkStr(cls, (UINT32)wcslen(cls), &name);
+    if (FAILED(hr)) return hr;
+    hr = factory(name, iid, outp);
+    delStr(name);
+    return hr;
+  };
+
+  IGraphicsCaptureItemInterop* interop = nullptr;
+  HRESULT hr = get_factory(L"Windows.Graphics.Capture.GraphicsCaptureItem", IID_IGraphicsCaptureItemInterop_, (void**)&interop);
+  if (FAILED(hr) || !interop) die(41, "wgc", "fábrica do item 0x%08lx", (unsigned long)hr);
+  hr = interop->CreateForWindow(g_hwnd, IID_IGraphicsCaptureItem_, (void**)&w_item);
+  interop->Release();
+  if (FAILED(hr) || !w_item) die(42, "wgc", "janela não capturável 0x%08lx", (unsigned long)hr);
+  w_item->get_Size(&w_size);
+  if (w_size.Width <= 0 || w_size.Height <= 0) w_size = {2, 2};
+
+  IDXGIDevice* dxgi = nullptr;
+  g_dev->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgi);
+  hr = dxgi ? mkDevice(dxgi, &w_device) : E_NOINTERFACE;
+  safe_release(&dxgi);
+  if (FAILED(hr) || !w_device) die(43, "wgc", "dispositivo 0x%08lx", (unsigned long)hr);
+
+  IDirect3D11CaptureFramePoolStatics2* statics = nullptr;
+  hr = get_factory(L"Windows.Graphics.Capture.Direct3D11CaptureFramePool", IID_IDirect3D11CaptureFramePoolStatics2_, (void**)&statics);
+  if (FAILED(hr) || !statics) die(44, "wgc", "fábrica do pool 0x%08lx", (unsigned long)hr);
+  hr = statics->CreateFreeThreaded(w_device, PIXEL_B8G8R8A8, 2, w_size, &w_pool);
+  statics->Release();
+  if (FAILED(hr) || !w_pool) die(45, "wgc", "pool 0x%08lx", (unsigned long)hr);
+  hr = w_pool->CreateCaptureSession(w_item, &w_session);
+  if (FAILED(hr) || !w_session) die(46, "wgc", "sessão 0x%08lx", (unsigned long)hr);
+
+  // Sem cursor (Windows 10 2004+). Sem ele o pedido é de "sem cursor", então não adianta seguir.
+  IGraphicsCaptureSession2* s2 = nullptr;
+  if (FAILED(w_session->QueryInterface(IID_IGraphicsCaptureSession2_, (void**)&s2)) || !s2)
+    die(47, "wgc", "este Windows não deixa tirar o cursor da captura (precisa do Windows 10 2004 ou mais novo)");
+  s2->put_IsCursorCaptureEnabled(0);
+  s2->Release();
+  // Sem a borda amarela (Windows 11; no 10 o Windows ignora).
+  IGraphicsCaptureSession3* s3 = nullptr;
+  if (SUCCEEDED(w_session->QueryInterface(IID_IGraphicsCaptureSession3_, (void**)&s3)) && s3) {
+    s3->put_IsBorderRequired(0);
+    s3->Release();
+  }
+  hr = w_session->StartCapture();
+  if (FAILED(hr)) die(48, "wgc", "iniciar 0x%08lx", (unsigned long)hr);
+  LOG("captura de janela sem cursor (WGC) %dx%d", w_size.Width, w_size.Height);
+}
+
+/** Pega o quadro mais novo (se houver) e copia para g_src. false = nenhum quadro novo. */
+static bool poll_window() {
+  IDirect3D11CaptureFrame* frame = nullptr;
+  IDirect3D11CaptureFrame* next = nullptr;
+  // Esvazia a fila: só interessa o mais recente.
+  while (SUCCEEDED(w_pool->TryGetNextFrame(&next)) && next) {
+    safe_release(&frame);
+    frame = next;
+    next = nullptr;
+  }
+  if (!frame) return false;
+  SizeInt32 cs = {0, 0};
+  frame->get_ContentSize(&cs);
+  bool ok = false;
+  IInspectable* surface = nullptr;
+  IDirect3DDxgiInterfaceAccess* access = nullptr;
+  ID3D11Texture2D* tex = nullptr;
+  if (SUCCEEDED(frame->get_Surface(&surface)) && surface &&
+      SUCCEEDED(surface->QueryInterface(IID_IDirect3DDxgiInterfaceAccess_, (void**)&access)) && access &&
+      SUCCEEDED(access->GetInterface(__uuidof(ID3D11Texture2D), (void**)&tex)) && tex) {
+    D3D11_TEXTURE2D_DESC d;
+    tex->GetDesc(&d);
+    int w = std::min<int>(std::max(2, cs.Width), (int)d.Width) & ~1;
+    int h = std::min<int>(std::max(2, cs.Height), (int)d.Height) & ~1;
+    if (w >= 2 && h >= 2 && ensure_src(w, h)) {
+      D3D11_BOX box = {0, 0, 0, (UINT)w, (UINT)h, 1};
+      g_ctx->CopySubresourceRegion(g_src, 0, 0, 0, 0, tex, 0, &box);
+      ok = true;
+    }
+  }
+  safe_release(&tex);
+  safe_release(&access);
+  safe_release(&surface);
+  close_winrt(frame);
+  frame->Release();
+  // A janela mudou de tamanho: recria o pool no tamanho novo (o próximo quadro já vem certo).
+  if (cs.Width > 0 && cs.Height > 0 && (cs.Width != w_size.Width || cs.Height != w_size.Height)) {
+    w_size = cs;
+    w_pool->Recreate(w_device, PIXEL_B8G8R8A8, 2, w_size);
+  }
+  return ok;
+}
+
+static void stop_window_capture() {
+  close_winrt(w_session);
+  safe_release(&w_session);
+  close_winrt(w_pool);
+  safe_release(&w_pool);
+  safe_release(&w_item);
+  close_winrt(w_device);
+  safe_release(&w_device);
+}
+
+/** Acha o monitor do ponto e a placa de vídeo dele (o dispositivo D3D precisa ser criado nela). */
+static void find_output() {
+  HMONITOR mon = MonitorFromPoint(g_point, MONITOR_DEFAULTTOPRIMARY);
+  IDXGIFactory1* f = nullptr;
+  if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&f)) || !f) die(50, "tela", "DXGI indisponível");
+  IDXGIAdapter1* a = nullptr;
+  for (UINT ai = 0; !d_output && f->EnumAdapters1(ai, &a) != DXGI_ERROR_NOT_FOUND; ai++) {
+    IDXGIOutput* o = nullptr;
+    for (UINT oi = 0; a->EnumOutputs(oi, &o) != DXGI_ERROR_NOT_FOUND; oi++) {
+      DXGI_OUTPUT_DESC od;
+      if (SUCCEEDED(o->GetDesc(&od)) && od.Monitor == mon && SUCCEEDED(o->QueryInterface(__uuidof(IDXGIOutput1), (void**)&d_output))) {
+        g_adapter = a;
+        a->AddRef();
+        o->Release();
+        break;
+      }
+      o->Release();
+    }
+    a->Release();
+  }
+  f->Release();
+  if (!d_output) die(51, "tela", "monitor não encontrado");
+}
+
+static bool open_duplication() {
+  safe_release(&d_dup);
+  HRESULT hr = d_output->DuplicateOutput(g_dev, &d_dup);
+  if (FAILED(hr)) {
+    LOG("DuplicateOutput 0x%08lx", (unsigned long)hr);
+    return false;
+  }
+  DXGI_OUTDUPL_DESC dd;
+  d_dup->GetDesc(&dd);
+  if (dd.Rotation != DXGI_MODE_ROTATION_IDENTITY && dd.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED) LOG("monitor girado: a imagem sai girada");
+  return true;
+}
+
+/** Desktop Duplication: copia o quadro novo (se houver) para g_src. A imagem não traz o cursor. */
+static bool poll_screen() {
+  if (!d_dup && !open_duplication()) return false;
+  DXGI_OUTDUPL_FRAME_INFO info;
+  IDXGIResource* res = nullptr;
+  HRESULT hr = d_dup->AcquireNextFrame(0, &info, &res);
+  if (hr == DXGI_ERROR_WAIT_TIMEOUT) return false;
+  if (FAILED(hr)) {
+    // Troca de resolução, tela do UAC, jogo em tela cheia exclusiva assumindo: abre de novo depois.
+    if (hr != DXGI_ERROR_ACCESS_LOST) LOG("AcquireNextFrame 0x%08lx", (unsigned long)hr);
+    safe_release(&d_dup);
+    return false;
+  }
+  bool ok = false;
+  ID3D11Texture2D* tex = nullptr;
+  if (info.LastPresentTime.QuadPart != 0 && SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex)) && tex) {
+    D3D11_TEXTURE2D_DESC d;
+    tex->GetDesc(&d);
+    if (d.Format == DXGI_FORMAT_B8G8R8A8_UNORM && ensure_src((int)d.Width & ~1, (int)d.Height & ~1)) {
+      D3D11_BOX box = {0, 0, 0, (UINT)g_src_w, (UINT)g_src_h, 1};
+      g_ctx->CopySubresourceRegion(g_src, 0, 0, 0, 0, tex, 0, &box);
+      ok = true;
+    } else if (d.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+      LOG("formato da tela não suportado: %d", (int)d.Format);
+    }
+  }
+  safe_release(&tex);
+  safe_release(&res);
+  d_dup->ReleaseFrame();
+  return ok;
+}
+
+/** Laço da captura sem hook: um quadro por tique (o último, se a imagem não mudou). */
+static int run_plain() {
+  if (g_mode == MODE_WINDOW) start_window_capture();
+  else if (!open_duplication()) die(52, "tela", "o Windows recusou duplicar a tela");
+
+  HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, 0x2 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+  if (!timer) {
+    timeBeginPeriod(1);
+    timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+  }
+  LARGE_INTEGER due;
+  due.QuadPart = -(10000000LL / g_fps);
+  SetWaitableTimer(timer, &due, (LONG)std::max(1, 1000 / g_fps), nullptr, nullptr, FALSE);
+  LARGE_INTEGER freq, now;
+  QueryPerformanceFrequency(&freq);
+  DWORD started = GetTickCount();
+  bool hooked = false;
+
+  while (!g_quit) {
+    WaitForSingleObject(timer, 100);
+    if (g_quit) break;
+    if (g_mode == MODE_WINDOW && !IsWindow(g_hwnd)) {
+      out("LOST a janela fechou");
+      break;
+    }
+    reap_old();
+    bool fresh = g_mode == MODE_WINDOW ? poll_window() : poll_screen();
+    if (fresh && !hooked) {
+      hooked = true;
+      out("HOOKED %d %d %s", g_src_w, g_src_h, g_mode == MODE_WINDOW ? "janela" : "tela");
+    }
+    if (!hooked) {
+      // Janela minimizada não entrega quadro: só desiste se nunca chegou nenhum.
+      if (GetTickCount() - started > 8000) die(53, "tempo", "nenhum quadro em 8 s (janela minimizada?)");
+      continue;
+    }
+    if (!g_src_srv) continue;
+    int slot = -1;
+    for (int k = 0; k < NSLOTS; k++) {
+      int i = (g_next_slot + k) % NSLOTS;
+      if (!g_slots[i].busy) {
+        slot = i;
+        break;
+      }
+    }
+    if (slot < 0) continue;
+    if (!render_to(slot)) continue;
+    InterlockedExchange(&g_slots[slot].busy, 1);
+    g_next_slot = (slot + 1) % NSLOTS;
+    QueryPerformanceCounter(&now);
+    out("FRAME %ld %d %" PRIu64, g_gen, slot, (uint64_t)(now.QuadPart / (freq.QuadPart / 1000000 ? freq.QuadPart / 1000000 : 1)));
+  }
+  if (g_mode == MODE_WINDOW) stop_window_capture();
+  safe_release(&d_dup);
+  safe_release(&d_output);
+  release_src();
+  free_slots();
+  for (int i = 0; i < g_old_count; i++) close_remote(g_old_remote[i]);
+  return 0;
+}
+
 static void parse_args() {
   int argc = 0;
   wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -752,13 +1121,19 @@ static void parse_args() {
     else if (!wcscmp(k, L"--fps")) g_fps = std::min(240, std::max(1, (int)wcstol(v, nullptr, 10)));
     else if (!wcscmp(k, L"--height")) g_max_h = std::min(4320, std::max(0, (int)wcstol(v, nullptr, 10)));
     else if (!wcscmp(k, L"--obs")) wcsncpy(g_obs_dir, v, MAX_PATH - 1);
+    else if (!wcscmp(k, L"--mode")) g_mode = !wcscmp(v, L"window") ? MODE_WINDOW : !wcscmp(v, L"screen") ? MODE_SCREEN : MODE_HOOK;
+    else if (!wcscmp(k, L"--point")) {
+      wchar_t* end = nullptr;
+      g_point.x = (LONG)wcstol(v, &end, 10);
+      g_point.y = end && *end == L',' ? (LONG)wcstol(end + 1, nullptr, 10) : 0;
+    }
   }
   if (!g_obs_dir[0]) {
     GetModuleFileNameW(nullptr, g_obs_dir, MAX_PATH);
     if (wchar_t* s = wcsrchr(g_obs_dir, L'\\')) wcscpy(s, L"\\obs");
   }
   if (argv) LocalFree(argv);
-  if (!g_hwnd || !IsWindow(g_hwnd)) die(2, "args", "--hwnd inválido");
+  if (g_mode != MODE_SCREEN && (!g_hwnd || !IsWindow(g_hwnd))) die(2, "args", "--hwnd inválido");
   if (!g_parent_pid) die(2, "args", "--parent ausente");
 }
 
@@ -769,6 +1144,16 @@ int main() {
   parse_args();
   g_parent = OpenProcess(PROCESS_DUP_HANDLE | SYNCHRONIZE, FALSE, g_parent_pid);
   if (!g_parent) die(3, "pai", "OpenProcess %lu", GetLastError());
+  if (g_mode != MODE_HOOK) {
+    // Desktop Duplication recusa processos sem DPI por monitor (e o WGC mede a janela certa assim).
+    typedef BOOL(WINAPI * PFN_SetDpiCtx)(HANDLE);
+    if (auto set = (PFN_SetDpiCtx)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"))
+      set((HANDLE)-4 /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */);
+    if (g_mode == MODE_SCREEN) find_output();
+    init_d3d();
+    CreateThread(nullptr, 0, stdin_thread, nullptr, 0, nullptr);
+    return run_plain();
+  }
   check_target();
   init_d3d();
   g_offsets = load_offsets(g_is64);

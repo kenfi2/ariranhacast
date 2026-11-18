@@ -61,10 +61,11 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   startAudioCap: (sourceId: string) => ipcRenderer.invoke('lc:audiocap-start', sourceId),
   stopAudioCap: () => ipcRenderer.invoke('lc:audiocap-stop'),
   gameCapAvailable: async () => textureSupport && (await ipcRenderer.invoke('lc:gamecap-available')) === true,
-  gameCapStart: (sourceId: string, fps: number, height: number) => {
+  gameCapStart: (sourceId: string, fps: number, height: number, mode: 'hook' | 'plain') => {
     openFrameChannel();
-    return ipcRenderer.invoke('lc:gamecap-start', sourceId, fps, height);
+    return ipcRenderer.invoke('lc:gamecap-start', sourceId, fps, height, mode === 'plain' ? 'plain' : 'hook');
   },
+  noCursorAvailable: async () => textureSupport && (await ipcRenderer.invoke('lc:nocursor-available')) === true,
   gameCapStop: () => {
     closeFrameChannel();
     return ipcRenderer.invoke('lc:gamecap-stop');

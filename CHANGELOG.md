@@ -11,7 +11,8 @@
 -->
 
 ## 0.9.1 (18/11/2026)
-- PC: o cursor do mouse e os botões somem quando o mouse fica parado em cima da transmissão.
+- PC: o cursor do mouse de quem transmite não aparece mais na transmissão (janela ou tela inteira). Para mostrar, marque "Mostrar o cursor do mouse na transmissão" ao escolher o que transmitir.
+- PC: para quem assiste, o cursor do mouse e os botões somem quando o mouse fica parado em cima da transmissão.
 - PC: os botões da transmissão agora são ícones (volume, estatísticas, grade, tela cheia e parar de assistir); o de tela cheia vira "sair da tela cheia".
 - PC: nos cartões das salas aparece a foto da conta de cada pessoa, não só a inicial.
 - PC: na barra de amigos online, um selo verde mostra quem está em call (alto-falante) ou transmitindo (tela), no lugar das duas bolinhas.

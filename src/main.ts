@@ -220,19 +220,43 @@ function stopGameCap(): void {
   }, 2000);
 }
 
-function startGameCap(sourceId: unknown, fps: unknown, height: unknown): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }> {
+/** Ponto (pixels físicos) no meio do monitor de uma fonte "screen:…" (para o gamecap achar o monitor). */
+async function screenPoint(sourceId: string): Promise<string | null> {
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
+  const src = sources.find((x) => x.id === sourceId);
+  const displays = screen.getAllDisplays();
+  const d = (src && displays.find((x) => String(x.id) === src.display_id)) ?? (sources.length === 1 ? screen.getPrimaryDisplay() : undefined);
+  if (!d) return null;
+  const p = screen.dipToScreenPoint({ x: d.bounds.x + Math.floor(d.bounds.width / 2), y: d.bounds.y + Math.floor(d.bounds.height / 2) });
+  return `${Math.round(p.x)},${Math.round(p.y)}`;
+}
+
+/**
+ * mode "hook": captura de jogo (hook do OBS, só janelas). mode "plain": captura normal de janela ou
+ * tela, mas sem o cursor do mouse (o Chromium sempre desenha o cursor nas capturas dele).
+ */
+async function startGameCap(sourceId: unknown, fps: unknown, height: unknown, mode: unknown): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }> {
   stopGameCap();
+  const plain = mode === 'plain';
+  const exe = path.join(__dirname, '..', 'native', 'gamecap.exe');
+  const obsDir = path.join(__dirname, '..', 'native', 'obs');
+  if (typeof sourceId !== 'string' || !SOURCE_ID.test(sourceId)) return { ok: false, reason: 'fonte inválida' };
+  const wm = sourceId.match(/^window:(\d+):/);
+  if (!wm && !plain) return { ok: false, reason: 'só funciona com janelas' };
+  if (process.platform !== 'win32' || !fs.existsSync(exe) || (!plain && !fs.existsSync(obsDir))) return { ok: false, reason: 'indisponível neste sistema' };
+  if (typeof sharedTexture?.importSharedTexture !== 'function') return { ok: false, reason: 'esta versão do Electron não importa texturas' };
+  const f = Math.min(240, Math.max(1, Math.round(Number(fps) || 60)));
+  const h = Math.min(4320, Math.max(0, Math.round(Number(height) || 0)));
+  // Argumentos sempre numéricos (e o caminho do próprio app), passados como lista e sem shell.
+  const args = ['--parent', String(process.pid), '--fps', String(f), '--height', String(h)];
+  if (!plain) args.push('--hwnd', wm![1], '--obs', obsDir);
+  else if (wm) args.push('--mode', 'window', '--hwnd', wm[1]);
+  else {
+    const point = await screenPoint(sourceId).catch(() => null);
+    if (!point) return { ok: false, reason: 'monitor não encontrado' };
+    args.push('--mode', 'screen', '--point', point);
+  }
   return new Promise((resolve) => {
-    const exe = path.join(__dirname, '..', 'native', 'gamecap.exe');
-    const obsDir = path.join(__dirname, '..', 'native', 'obs');
-    const m = typeof sourceId === 'string' && SOURCE_ID.test(sourceId) ? sourceId.match(/^window:(\d+):/) : null;
-    if (!m) return resolve({ ok: false, reason: 'só funciona com janelas' });
-    if (process.platform !== 'win32' || !fs.existsSync(exe) || !fs.existsSync(obsDir)) return resolve({ ok: false, reason: 'indisponível neste sistema' });
-    if (typeof sharedTexture?.importSharedTexture !== 'function') return resolve({ ok: false, reason: 'esta versão do Electron não importa texturas' });
-    const f = Math.min(240, Math.max(1, Math.round(Number(fps) || 60)));
-    const h = Math.min(4320, Math.max(0, Math.round(Number(height) || 0)));
-    // Argumentos sempre numéricos (e o caminho do próprio app), passados como lista e sem shell.
-    const args = ['--hwnd', m[1], '--parent', String(process.pid), '--fps', String(f), '--height', String(h), '--obs', obsDir];
     const child = spawn(exe, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: false });
     gamecap = child;
 
@@ -244,7 +268,7 @@ function startGameCap(sourceId: unknown, fps: unknown, height: unknown): Promise
       if (!r.ok && gamecap === child) stopGameCap();
       resolve(r);
     };
-    const timeout = setTimeout(() => settle({ ok: false, reason: 'o jogo não respondeu' }), 20000);
+    const timeout = setTimeout(() => settle({ ok: false, reason: plain ? 'a captura não respondeu' : 'o jogo não respondeu' }), plain ? 10000 : 20000);
     const event = (s: GcState) => {
       if (gamecap === child) send('lc:gamecap', s); // eventos de uma captura já substituída são ignorados
     };
@@ -1093,7 +1117,8 @@ app.whenReady().then(() => {
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
   handle('lc:gamecap-available', () => process.platform === 'win32' && fs.existsSync(path.join(__dirname, '..', 'native', 'gamecap.exe')) && typeof sharedTexture?.importSharedTexture === 'function');
-  handle('lc:gamecap-start', (sourceId: unknown, fps: unknown, height: unknown) => startGameCap(sourceId, fps, height));
+  handle('lc:gamecap-start', (sourceId: unknown, fps: unknown, height: unknown, mode: unknown) => startGameCap(sourceId, fps, height, mode));
+  handle('lc:nocursor-available', () => process.platform === 'win32' && fs.existsSync(path.join(__dirname, '..', 'native', 'gamecap.exe')) && typeof sharedTexture?.importSharedTexture === 'function');
   handle('lc:gamecap-stop', () => stopGameCap());
   handle('lc:hotkeys', (keys: unknown) => setHotkeys(keys));
   handle('lc:updater-state', () => upd);
