@@ -10,6 +10,20 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.9.0 (17/11/2026)
+- PC: visual novo, com as salas abertas em cartões, busca por sala ou pessoa e o filtro "Dos meus servidores".
+- PC: "Criar sala" e "Entrar com código" abrem em janelas próprias; o limite de pessoas tem botões de − e +.
+- Ao criar sala, a opção "Notificar" escolhe se a sala é avisada no canal do Discord.
+- PC: as salas recentes guardam o nome, "Recriar" abre com o mesmo nome, e dá para limpar a lista.
+- PC: menu no seu perfil, no canto de cima, com Configurações, Novidades, Sair da conta e Fechar o AriranhaCast.
+- PC: os amigos online aparecem numa barra à direita, como a dos servidores.
+- PC: na chamada aparece a foto da conta de cada pessoa no lugar da inicial.
+- PC: a chamada e a transmissão ao vivo têm o mesmo visual; transmitindo, o próprio botão de transmitir vira o de parar.
+- PC: o painel da sala abre e fecha por um botão no canto, e a barra de botões não corta mais em janela estreita.
+- Ao sair do "silenciar vozes", o microfone volta como estava antes.
+- PC: as notificações do Windows não aparecem mais na lista do que transmitir.
+- PC: o aviso de quem está falando por cima do jogo não pisca mais a cada fala.
+
 ## 0.8.7 (17/11/2026)
 - Página "Novidades" com o que mudou em cada versão (no topo da janela no PC, na tela inicial no Android).
 - Depois de atualizar, o app mostra sozinho o que mudou (uma vez só).
