@@ -96,6 +96,8 @@ export class Voice {
   readonly prefs = loadVoicePrefs();
   micOn = false;
   deafened = false;
+  /** Microfone estava ligado quando a pessoa silenciou as vozes: volta ligado ao sair do silêncio. */
+  private micBeforeDeaf = false;
   micError = '';
   private ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
   private out = this.ctx.createMediaStreamDestination();
@@ -457,9 +459,18 @@ export class Voice {
   }
 
   setDeafened(on: boolean): void {
+    if (on === this.deafened) return;
     this.deafened = on;
     for (const r of this.remotes.values()) r.audio.muted = on;
-    if (on && this.micOn) void this.setMic(false);
+    // Como no Discord: silenciar tudo também desliga o microfone, e sair do silêncio devolve o microfone
+    // como estava antes (ligado continua ligado; desligado continua desligado).
+    if (on) {
+      this.micBeforeDeaf = this.micOn;
+      if (this.micOn) void this.setMic(false);
+    } else if (this.micBeforeDeaf && !this.micOn) {
+      this.micBeforeDeaf = false;
+      void this.setMic(true);
+    }
     this.onchange();
   }
 

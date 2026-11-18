@@ -34,6 +34,7 @@ export interface AriranhaBridge {
   gfxGet(): Promise<{ current: GfxConfig; saved: GfxConfig }>;
   gfxSet(cfg: GfxConfig): Promise<{ current: GfxConfig; saved: GfxConfig }>;
   relaunch(): Promise<void>;
+  quit(): Promise<void>;
   openExternal(url: string): Promise<boolean>;
   saveClip(data: ArrayBuffer, ext: string, voice?: boolean): Promise<{ ok: boolean; path?: string; error?: string }>;
   showClip(path: string): Promise<void>;
@@ -124,6 +125,7 @@ export interface RosterEntry {
   title: string; // nome da tela/janela transmitida
   muted: boolean; // microfone desligado
   deaf: boolean; // silenciou as vozes (não ouve a sala)
+  avatar: string; // foto da conta (Discord/Google), '' = sem foto
 }
 
 export type Msg =
@@ -140,7 +142,7 @@ export type Msg =
   | { t: 'need-parent'; failed: string }
   // sala: entrada (anfitrião desafia, participante se apresenta)
   | { t: 'challenge'; nonce: string; proto: number; version: string; password: boolean }
-  | { t: 'hello'; name: string; proto: number; version: string; auth: string; cnonce: string }
+  | { t: 'hello'; name: string; avatar?: string; proto: number; version: string; auth: string; cnonce: string }
   | { t: 'welcome'; auth: string }
   | { t: 'reject'; reason: 'version' | 'password' | 'full'; version: string }
   // sala: funcionamento

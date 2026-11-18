@@ -8,7 +8,7 @@
   </head>
   <body>
     <header id="topbar">
-      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-news" type="button" class="ghost small" title="O que mudou em cada versão">Novidades</button><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
+      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
       <div id="upd" class="upd" hidden>
         <span id="upd-spin" class="spinner" hidden aria-hidden="true"></span>
         <span id="upd-text" role="status"></span>
@@ -17,12 +17,16 @@
         <button id="upd-btn" type="button" class="primary small" hidden></button>
       </div>
       <div class="top-right">
-        <div id="account" class="account" hidden>
-          <span id="acc-avatar" class="acc-avatar"></span>
-          <span id="acc-name"></span>
-          <button id="btn-logout" type="button" class="ghost small" title="Sair da conta neste PC">Sair</button>
+        <button id="btn-me" type="button" class="me-btn" title="Conta e configurações" aria-haspopup="menu" aria-expanded="false"><span id="acc-avatar" class="acc-avatar"></span></button>
+        <div id="me-menu" class="menu" role="menu" hidden>
+          <div id="account" class="menu-head" hidden><span id="acc-name"></span><span class="muted">Conectado</span></div>
+          <button id="btn-settings" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Configurações</button>
+          <button id="btn-news" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>Novidades</button>
+          <div class="menu-sep"></div>
+          <button id="btn-logout" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11"/></svg>Sair da conta</button>
+          <div id="logout-sep" class="menu-sep" hidden></div>
+          <button id="btn-quit" type="button" role="menuitem" class="danger-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Fechar o AriranhaCast</button>
         </div>
-        <button id="btn-settings" class="ghost">Configurações</button>
       </div>
     </header>
 
@@ -39,9 +43,10 @@
       <nav id="guild-rail" class="guild-rail" aria-label="Seus servidores do Discord" hidden></nav>
       <div id="home-main" class="home-main">
       <!-- Login (obrigatório quando o app tem servidor de lobby) -->
-      <section id="login-card" class="card login" hidden>
+      <section id="login-card" class="card login glow-card" hidden>
         <img class="login-logo" src="icon.png" alt="" />
-        <h2>Entrar no AriranhaCast</h2>
+        <h2>AriranhaCast</h2>
+        <div class="login-sub">Sala de voz e transmissão de jogos com os amigos</div>
         <p>Use sua conta do Discord ou do Google. Seu nome e sua foto vêm da conta, e dá para ficar conectado no PC e no celular ao mesmo tempo.</p>
         <div id="login-providers" class="providers"></div>
         <div id="login-wait" class="muted" hidden>Termine o login no navegador que abriu. <button id="btn-login-again" type="button" class="ghost small">Abrir de novo</button></div>
@@ -49,51 +54,40 @@
       </section>
 
       <!-- Salas abertas -->
-      <section id="lobby-card" class="card lobby" hidden>
-        <div class="row between">
-          <h2>Salas abertas<span id="lobby-scope" class="lobby-scope"></span></h2>
-          <div class="lobby-head-right">
+      <section id="lobby-card" class="lobby" hidden>
+        <div class="lobby-head">
+          <div class="lobby-title">
+            <h1>Salas abertas<span id="lobby-scope" class="lobby-scope"></span></h1>
             <span id="lobby-status" class="muted"></span>
           </div>
+          <div class="lobby-actions">
+          <button id="btn-open-join" type="button" class="ghost pill-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H4"/></svg>Entrar com código</button>
+          <button id="btn-open-create" type="button" class="primary glow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Criar sala</button>
+          </div>
         </div>
-        <ul id="lobby-list"></ul>
+        <div class="lobby-tools">
+          <label class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg><input id="lobby-search" type="search" maxlength="40" placeholder="Procurar sala ou pessoa" autocomplete="off" spellcheck="false" /></label>
+          <div id="lobby-chips" class="chips" hidden>
+            <button type="button" class="chip on" data-scope="all">Todas</button>
+            <button type="button" class="chip" data-scope="mine">Dos meus servidores</button>
+          </div>
+        </div>
+        <ul id="lobby-list" class="room-grid"></ul>
         <div id="lobby-empty" class="lobby-empty" hidden>Nenhuma sala aberta agora.<br />Crie uma e ela aparece aqui para todo mundo.</div>
       </section>
 
       <div id="home-col" class="home-col">
-      <section class="card">
+      <!-- Online agora: quem está no AriranhaCast e tem servidor do Discord em comum -->
+      <!-- Sem servidor de lobby (testes): criar sala fica num cartão -->
+      <section id="create-card" class="card">
         <h2>Criar sala</h2>
         <p>Abre uma sala de voz. Lá dentro, cada um decide se só fala, liga a câmera ou transmite a tela.</p>
-        <input id="create-name" maxlength="40" placeholder="Nome da sala (opcional)" autocomplete="off" hidden />
-        <input id="create-pass" type="password" maxlength="64" placeholder="Senha (opcional)" autocomplete="off" />
-        <label class="limit-row" title="Cada pessoa a mais é uma conexão a mais para todos (P2P). Com câmera ligada, ~0,7 Mbps de upload por pessoa.">Máximo de pessoas
-          <input id="create-limit" type="number" min="2" max="50" step="1" />
-        </label>
-        <button id="btn-create" class="primary">Criar sala</button>
+        <button id="btn-open-create2" type="button" class="primary">Criar sala</button>
+        <button id="btn-open-join2" type="button" class="ghost">Entrar com código</button>
       </section>
-      <section class="card">
-        <h2>Entrar em uma sala</h2>
-        <p>Digite o código que te passaram.</p>
-        <form id="join-form">
-          <input id="join-code" placeholder="CÓDIGO" maxlength="8" autocomplete="off" spellcheck="false" />
-          <button id="btn-join" class="primary" type="submit">Entrar</button>
-        </form>
-        <input id="join-pass" type="password" maxlength="64" placeholder="Senha (se a sala tiver)" autocomplete="off" />
-        <div id="recent" hidden>
-          <div class="label">Salas recentes</div>
-          <ul id="recent-list"></ul>
-        </div>
-      </section>
+
       </div>
-      <!-- Online agora: quem está no AriranhaCast e tem servidor do Discord em comum -->
-      <section id="online-card" class="card online" hidden>
-        <div class="row between">
-          <h2>Online agora</h2>
-          <span id="online-count" class="muted"></span>
-        </div>
-        <ul id="online-list"></ul>
-        <p id="online-empty" class="muted" hidden>Ninguém dos seus servidores está online agora.</p>
-      </section>
+
 
       <div id="home-status" class="connecting" role="status" hidden>
         <span class="spinner" aria-hidden="true"></span>
@@ -101,10 +95,14 @@
         <button id="btn-cancel" type="button" class="ghost">Cancelar</button>
       </div>
       </div>
+      <!-- Amigos online agora (com servidor do Discord em comum): some quando não tem ninguém -->
+      <nav id="friend-rail" class="guild-rail friend-rail" aria-label="Amigos online agora" hidden></nav>
     </main>
 
     <!-- Sala -->
     <main id="view-room" class="view" hidden>
+      <!-- Um só botão para esconder/mostrar o painel, sempre no mesmo lugar (por cima do chat, se aberto) -->
+      <button id="btn-panel" type="button" class="panel-toggle" title="Esconder o painel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
       <div id="room-main">
         <div id="room-status" class="banner" hidden></div>
         <div id="stage" class="tiles"></div>
@@ -125,13 +123,12 @@
             <button id="btn-chat" class="round" title="Chat"><span id="chat-badge" class="badge-n" hidden></span></button>
             <button id="btn-leave" class="round hangup" title="Sair da sala"></button>
           </div>
-          <div class="ctl-right">
-            <button id="btn-panel" class="ghost small">Painel</button>
-          </div>
+          <div class="ctl-right"></div>
         </div>
       </div>
       <aside id="chat-side" class="side chat" hidden></aside>
       <aside id="room-side" class="side">
+        <div class="side-head"><span>Painel</span></div>
         <div id="voice-box" class="voice"></div>
         <div id="turn-usage" class="muted" hidden></div>
         <div id="mystream" hidden>
@@ -150,6 +147,66 @@
       </aside>
     </main>
 
+    <!-- Entrar com código -->
+    <dialog id="dlg-join">
+      <div class="dlg-head">
+        <h2>Entrar com código</h2>
+        <button id="btn-join-close" type="button" class="icon-btn" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <p class="muted">Digite o código que te passaram.</p>
+      <form id="join-form">
+        <input id="join-code" placeholder="CÓDIGO" maxlength="8" autocomplete="off" spellcheck="false" />
+        <button id="btn-join" class="primary" type="submit">Entrar</button>
+      </form>
+      <input id="join-pass" type="password" maxlength="64" placeholder="Senha (se a sala tiver)" autocomplete="off" />
+      <div id="recent" hidden>
+        <div class="recent-head">
+          <span class="label">Salas recentes</span>
+          <button id="btn-recent-clear" type="button" class="ghost small">Limpar</button>
+        </div>
+        <ul id="recent-list"></ul>
+      </div>
+    </dialog>
+
+    <!-- Criar sala -->
+    <dialog id="dlg-create">
+      <form id="create-form" method="dialog">
+        <div class="dlg-head">
+          <h2>Criar sala</h2>
+          <button type="submit" value="cancel" class="icon-btn" aria-label="Fechar" formnovalidate><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+        <p class="muted">Abre uma sala de voz. Lá dentro, cada um decide se só fala, liga a câmera ou transmite a tela.</p>
+        <label id="create-name-row">Nome da sala
+          <input id="create-name" maxlength="40" placeholder="Opcional" autocomplete="off" />
+        </label>
+        <div class="field-row" title="Cada pessoa a mais é uma conexão a mais para todos (P2P). Com câmera ligada, ~0,7 Mbps de upload por pessoa.">
+          <span>Máximo de pessoas</span>
+          <div class="spin">
+            <button id="limit-dec" type="button" aria-label="Menos uma pessoa">−</button>
+            <input id="create-limit" type="number" min="2" max="50" step="1" aria-label="Máximo de pessoas" />
+            <button id="limit-inc" type="button" aria-label="Mais uma pessoa">+</button>
+          </div>
+        </div>
+        <label>Senha
+          <input id="create-pass" type="password" maxlength="64" placeholder="Opcional" autocomplete="off" />
+        </label>
+        <label id="create-announce-row" class="check switch" title="Avisa no canal do Discord quando a sala abrir">
+          <span>Notificar</span>
+          <input id="create-announce" type="checkbox" checked />
+        </label>
+        <fieldset class="host-mode">
+          <legend>Onde a sala roda</legend>
+          <label class="radio"><input type="radio" name="host-mode" value="p2p" checked /> <span>Direto entre as pessoas (P2P)</span></label>
+          <label class="radio off" title="Ainda não disponível"><input type="radio" name="host-mode" value="server" disabled /> <span>Meu servidor</span> <span class="soon">em breve</span></label>
+          <input id="create-server" placeholder="endereço do servidor" disabled />
+        </fieldset>
+        <div class="row end">
+          <button type="submit" value="cancel" class="ghost" formnovalidate>Cancelar</button>
+          <button id="btn-create" type="button" class="primary">Criar sala</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- Escolher o que transmitir -->
     <dialog id="dlg-share">
       <div class="share">
@@ -158,12 +215,16 @@
             <h2>O que você quer transmitir?</h2>
             <button id="btn-refresh" class="ghost small">Atualizar lista</button>
           </div>
-          <h3>Telas</h3>
-          <div id="grid-screens" class="grid"></div>
-          <h3>Janelas</h3>
+          <div class="seg share-tabs" role="tablist">
+            <button type="button" data-src="window" class="on">Janelas e jogos</button>
+            <button type="button" data-src="screen">Tela inteira</button>
+          </div>
+          <div id="grid-screens" class="grid" hidden></div>
+          <div id="pane-windows">
           <p id="share-border-tip" class="muted" hidden>No Windows 10, o próprio Windows desenha uma borda amarela na janela capturada e nenhum app consegue tirar (quem assiste não vê a borda). Para não ter a borda, transmita a tela inteira; no Windows 11 ela não aparece. Também dá para mudar em Configurações > Desempenho.</p>
           <label id="gamecap-row" class="check" hidden title="Injeta no jogo o mesmo módulo de captura do OBS Studio (assinado pela OBS Project). Funciona com jogos em DirectX 9 a 12 e OpenGL."><input id="opt-gamecap" type="checkbox" /> Captura de jogo (como o OBS e o Discord): sem borda e mais leve. Experimental; se o jogo não aceitar, usa a captura de janela.</label>
           <div id="grid-windows" class="grid"></div>
+          </div>
         </div>
         <aside class="share-side">
           <h3>Qualidade</h3>

@@ -123,7 +123,7 @@ const SOURCE_ID = /^(screen|window):\d{1,20}:\d{1,10}$/;
 // Janelas de sistema/overlay que o Windows lista como "janela", mas não são algo a transmitir
 // (são transparentes ou ficam pretas na captura).
 const HIDDEN_WINDOWS =
-  /^(?:NVIDIA GeForce Overlay|NVIDIA Overlay|NVIDIA App Overlay|AMD (?:Radeon )?Software(?:: Adrenalin Edition)? Overlay|Radeon Overlay|Xbox Game Bar|Game Bar|Steam Overlay|Program Manager|Microsoft Text Input Application|Windows Input Experience|Experiência de Entrada do Windows|Aplicativo de Entrada de Texto da Microsoft)$/i;
+  /^(?:NVIDIA GeForce Overlay|NVIDIA Overlay|NVIDIA App Overlay|AMD (?:Radeon )?Software(?:: Adrenalin Edition)? Overlay|Radeon Overlay|Xbox Game Bar|Game Bar|Steam Overlay|Program Manager|Microsoft Text Input Application|Windows Input Experience|Experiência de Entrada do Windows|Aplicativo de Entrada de Texto da Microsoft|Nova notificação|New notification|Central de Notificações|Notification Center|Centro de ações|Action center)$/i;
 
 /** Só a nossa própria janela, carregando a nossa própria página, pode usar o IPC. */
 function trusted(e: IpcMainInvokeEvent): boolean {
@@ -503,11 +503,25 @@ function updateOverlay(): void {
  * só fica visível enquanto há algo para mostrar; com ninguém falando, ela some de verdade.
  */
 let overlayRows: { name: string; color: string; speaking: boolean; muted: boolean }[] = [];
+// Mostrar/esconder uma janela "sempre por cima" mexe com o Explorer (Alt+Tab, barra de tarefas). Fazer
+// isso a cada vez que alguém começa/para de falar deixava o Windows lento numa conversa longa. Agora a
+// janela aparece na hora, mas só some depois de um tempo sem ninguém falar.
+const OVERLAY_HIDE_MS = 15_000;
+let overlayHideTimer: NodeJS.Timeout | null = null;
 function syncOverlayVisible(): void {
   if (!overlay || overlay.isDestroyed() || overlay.webContents.isLoading()) return;
   const want = overlayRows.some((r) => overlayCfg.mode === 'all' || r.speaking);
-  if (want && !overlay.isVisible()) overlay.showInactive();
-  else if (!want && overlay.isVisible()) overlay.hide();
+  if (want) {
+    if (overlayHideTimer) clearTimeout(overlayHideTimer);
+    overlayHideTimer = null;
+    if (!overlay.isVisible()) overlay.showInactive();
+  } else if (overlay.isVisible() && !overlayHideTimer) {
+    overlayHideTimer = setTimeout(() => {
+      overlayHideTimer = null;
+      if (!overlay || overlay.isDestroyed()) return;
+      if (!overlayRows.some((r) => overlayCfg.mode === 'all' || r.speaking)) overlay.hide();
+    }, OVERLAY_HIDE_MS);
+  }
 }
 
 function cleanOverlayCfg(v: unknown): OverlayCfg {
@@ -553,19 +567,23 @@ const accountFile = (): string => path.join(app.getPath('userData'), 'conta.bin'
 const lobby = new LobbyClient(
   lobbyUrl(),
   {
-    load(): Session | null {
+    // API assíncrona do safeStorage (a síncrona está obsoleta no Electron). Lê o que a versão antiga gravou.
+    async load(): Promise<Session | null> {
       try {
-        if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(accountFile())) return null;
-        return JSON.parse(safeStorage.decryptString(fs.readFileSync(accountFile())));
+        if (!fs.existsSync(accountFile()) || !(await safeStorage.isAsyncEncryptionAvailable())) return null;
+        const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(fs.readFileSync(accountFile()));
+        const session = JSON.parse(result) as Session;
+        if (shouldReEncrypt) fs.writeFileSync(accountFile(), await safeStorage.encryptStringAsync(result));
+        return session;
       } catch (e) {
         writeLog('error', 'conta', e);
         return null;
       }
     },
-    save(s: Session | null): void {
+    async save(s: Session | null): Promise<void> {
       try {
         if (!s) fs.rmSync(accountFile(), { force: true });
-        else if (safeStorage.isEncryptionAvailable()) fs.writeFileSync(accountFile(), safeStorage.encryptString(JSON.stringify(s)));
+        else if (await safeStorage.isAsyncEncryptionAvailable()) fs.writeFileSync(accountFile(), await safeStorage.encryptStringAsync(JSON.stringify(s)));
       } catch (e) {
         writeLog('error', 'conta', e);
       }
@@ -593,6 +611,7 @@ function cleanPublished(raw: unknown): PublishedRoom | null {
     members: Array.isArray(r.members) ? r.members.slice(0, 20).map((m) => text(m, 24)).filter(Boolean) : [],
     live: int(r.live, 16),
     proto: int(r.proto, 1000),
+    quiet: r.quiet === true,
   };
 }
 
@@ -1062,6 +1081,11 @@ app.whenReady().then(() => {
   });
 
   handle('lc:platform', () => process.platform);
+  // "Fechar o AriranhaCast" no menu do perfil (mesmo que o item da bandeja).
+  handle('lc:quit', () => {
+    quitting = true;
+    app.quit();
+  });
   handle('lc:version', () => app.getVersion());
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
