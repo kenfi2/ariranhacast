@@ -2,10 +2,10 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env, Guild, Online, Room, User } from "./types";
 
 /** room = sala publicada (só quem hospeda); at/device = onde a pessoa está (todo mundo informa). */
-type Attachment = { user: User; room?: Room; at?: string | null; device?: string };
+type Attachment = { user: User; room?: Room; at?: string | null; device?: string; live?: boolean };
 
 const SESSION_TTL_MS = 60 * 24 * 3600_000; // 60 dias sem precisar logar de novo
-const MAX_MESSAGE = 4096;
+const MAX_MESSAGE = 8192; // set_room leva a foto de cada pessoa da sala
 const CODE_RE = /^[A-Z0-9]{4,16}$/;
 /** Quanto tempo uma sala pode sumir da lista (troca de quem hospeda, rede piscando) antes do aviso "encerrada". */
 const CLOSE_GRACE_MS = 30_000;
@@ -30,6 +30,17 @@ function clean(value: unknown, max: number): string {
 }
 
 const int = (v: unknown, min: number, max: number) => (Number.isInteger(v) ? Math.min(max, Math.max(min, v as number)) : min);
+
+/** Foto de conta: só https do CDN do Discord ou do Google (o app também só aceita essas). */
+function cleanAvatar(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 300) return null;
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" && (u.hostname === "cdn.discordapp.com" || u.hostname.endsWith(".googleusercontent.com")) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Um único objeto ("main") guarda as sessões (SQLite) e os WebSockets do lobby.
@@ -154,6 +165,13 @@ export class Lobby extends DurableObject<Env> {
         const now = Date.now();
         const prev = att.room?.code === code ? att.room : undefined;
         const members = Array.isArray(msg.members) ? msg.members.slice(0, 20).map((m) => clean(m, 24)).filter(Boolean) : [];
+        // Quem está na sala com a foto (apps antigos só mandam `members`).
+        const people = Array.isArray(msg.people)
+          ? msg.people
+              .slice(0, 20)
+              .map((p: any) => ({ name: clean(p?.name, 24), avatar: cleanAvatar(p?.avatar) }))
+              .filter((p: { name: string }) => p.name)
+          : members.map((name) => ({ name, avatar: null }));
         const room: Room = {
           code,
           name: clean(msg.name, 40) || `Sala de ${att.user.name}`,
@@ -162,6 +180,7 @@ export class Lobby extends DurableObject<Env> {
           count: int(msg.count, 1, 50),
           max: msg.max === undefined ? 16 : int(msg.max, 2, 50),
           members,
+          people,
           live: int(msg.live, 0, 16),
           proto: int(msg.proto, 0, 1000),
           createdAt: prev?.createdAt ?? now,
@@ -190,8 +209,9 @@ export class Lobby extends DurableObject<Env> {
       case "presence": {
         const at = typeof msg.room === "string" && CODE_RE.test(msg.room.toUpperCase()) ? msg.room.toUpperCase() : null;
         const device = msg.device === "android" ? "android" : "pc";
-        if (att.at === at && att.device === device) break;
-        ws.serializeAttachment({ ...att, at, device } satisfies Attachment);
+        const live = at !== null && msg.live === true; // transmitindo a tela na sala
+        if (att.at === at && att.device === device && !!att.live === live) break;
+        ws.serializeAttachment({ ...att, at, device, live } satisfies Attachment);
         this.broadcastRooms();
         break;
       }
@@ -264,11 +284,12 @@ export class Lobby extends DurableObject<Env> {
       if (!o) {
         const shared = [...ids(a.user.id)].filter((g) => mine.has(g));
         if (!shared.length) continue;
-        byUser.set(a.user.id, (o = { id: a.user.id, name: a.user.name, avatar: a.user.avatar, room: null, devices: [], guilds: shared.slice(0, 10) }));
+        byUser.set(a.user.id, (o = { id: a.user.id, name: a.user.name, avatar: a.user.avatar, room: null, live: false, devices: [], guilds: shared.slice(0, 10) }));
       }
       const device = a.device ?? "pc";
       if (!o.devices.includes(device)) o.devices.push(device);
       o.room ??= a.at ?? a.room?.code ?? null;
+      if (a.live) o.live = true;
     }
     return [...byUser.values()].sort((x, y) => Number(!!y.room) - Number(!!x.room) || x.name.localeCompare(y.name, "pt-BR")).slice(0, 100);
   }

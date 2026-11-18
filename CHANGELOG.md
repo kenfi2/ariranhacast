@@ -10,6 +10,13 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.9.1 (18/11/2026)
+- PC: o cursor do mouse de quem transmite não aparece mais na transmissão (janela ou tela inteira). Para mostrar, marque "Mostrar o cursor do mouse na transmissão" ao escolher o que transmitir.
+- PC: para quem assiste, o cursor do mouse e os botões somem quando o mouse fica parado em cima da transmissão.
+- PC: os botões da transmissão agora são ícones (volume, estatísticas, grade, tela cheia e parar de assistir); o de tela cheia vira "sair da tela cheia".
+- PC: nos cartões das salas aparece a foto da conta de cada pessoa, não só a inicial.
+- PC: na barra de amigos online, um selo verde mostra quem está em call (alto-falante) ou transmitindo (tela), no lugar das duas bolinhas.
+
 ## 0.9.0 (17/11/2026)
 - PC: visual novo, com as salas abertas em cartões, busca por sala ou pessoa e o filtro "Dos meus servidores".
 - PC: "Criar sala" e "Entrar com código" abrem em janelas próprias; o limite de pessoas tem botões de − e +.

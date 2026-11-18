@@ -61,10 +61,11 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   startAudioCap: (sourceId: string) => ipcRenderer.invoke('lc:audiocap-start', sourceId),
   stopAudioCap: () => ipcRenderer.invoke('lc:audiocap-stop'),
   gameCapAvailable: async () => textureSupport && (await ipcRenderer.invoke('lc:gamecap-available')) === true,
-  gameCapStart: (sourceId: string, fps: number, height: number) => {
+  gameCapStart: (sourceId: string, fps: number, height: number, mode: 'hook' | 'plain') => {
     openFrameChannel();
-    return ipcRenderer.invoke('lc:gamecap-start', sourceId, fps, height);
+    return ipcRenderer.invoke('lc:gamecap-start', sourceId, fps, height, mode === 'plain' ? 'plain' : 'hook');
   },
+  noCursorAvailable: async () => textureSupport && (await ipcRenderer.invoke('lc:nocursor-available')) === true,
   gameCapStop: () => {
     closeFrameChannel();
     return ipcRenderer.invoke('lc:gamecap-stop');
@@ -102,7 +103,7 @@ contextBridge.exposeInMainWorld('ariranhacast', {
   lobbyLogin: (provider: string) => ipcRenderer.invoke('lc:lobby-login', provider),
   lobbyLogout: () => ipcRenderer.invoke('lc:lobby-logout'),
   lobbyPublish: (room: unknown) => ipcRenderer.invoke('lc:lobby-publish', room),
-  lobbyPresence: (code: string | null) => ipcRenderer.invoke('lc:lobby-presence', code),
+  lobbyPresence: (code: string | null, live: boolean) => ipcRenderer.invoke('lc:lobby-presence', code, live === true),
   onLobby: (cb: (s: unknown) => void) => on('lc:lobby', cb),
   onLobbyError: (cb: (text: string) => void) => on('lc:lobby-error', cb),
 });

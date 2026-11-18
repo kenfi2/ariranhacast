@@ -16,7 +16,8 @@ export interface AriranhaBridge {
   stopAudioCap(): Promise<void>;
   gameCapAvailable(): Promise<boolean>;
   /** Os quadros chegam por um MessagePort entregue via window.postMessage({ type: 'ariranhacast:frames' }). */
-  gameCapStart(sourceId: string, fps: number, height: number): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }>;
+  gameCapStart(sourceId: string, fps: number, height: number, mode: 'hook' | 'plain'): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }>;
+  noCursorAvailable(): Promise<boolean>;
   gameCapStop(): Promise<void>;
   onGameCap(cb: (s: GameCapState) => void): void;
   onPcm(cb: (chunk: Uint8Array) => void): void;
@@ -53,7 +54,7 @@ export interface AriranhaBridge {
   lobbyLogin(provider: string): Promise<boolean>;
   lobbyLogout(): Promise<void>;
   lobbyPublish(room: PublishedRoom | null): Promise<void>;
-  lobbyPresence(code: string | null): Promise<void>;
+  lobbyPresence(code: string | null, live: boolean): Promise<void>;
   onLobby(cb: (s: LobbyState) => void): void;
   onLobbyError(cb: (text: string) => void): void;
 }

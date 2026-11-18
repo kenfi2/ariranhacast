@@ -29,3 +29,7 @@ No Windows, com o MSVC:
 Teste isolado (com o jogo aberto; o HWND decimal sai, por exemplo, do Spy++ ou do
 `desktopCapturer`): `gamecap --hwnd <HWND> --parent <PID de qualquer processo seu> --obs obs`.
 Deve imprimir `HOOKED`, `TEX` e uma linha `FRAME` por quadro.
+
+Captura sem o cursor (sem hook, usada na captura normal de janela/tela):
+`gamecap --mode window --hwnd <HWND> --parent <PID>` (Windows Graphics Capture) ou
+`gamecap --mode screen --point <x>,<y> --parent <PID>` (Desktop Duplication do monitor que contém o ponto).
