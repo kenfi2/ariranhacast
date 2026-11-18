@@ -10,6 +10,10 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.9.2 (18/11/2026)
+- PC: o aviso de quem está falando por cima do jogo mostra a foto da conta de cada pessoa.
+- Nos cartões das salas, a foto de quem está na sala aparece mesmo quando quem hospeda ainda não atualizou o app.
+
 ## 0.9.1 (18/11/2026)
 - PC: o cursor do mouse de quem transmite não aparece mais na transmissão (janela ou tela inteira). Para mostrar, marque "Mostrar o cursor do mouse na transmissão" ao escolher o que transmitir.
 - PC: para quem assiste, o cursor do mouse e os botões somem quando o mouse fica parado em cima da transmissão.

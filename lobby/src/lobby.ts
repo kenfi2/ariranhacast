@@ -245,7 +245,25 @@ export class Lobby extends DurableObject<Env> {
       const cur = byCode.get(room.code);
       if (!cur || room.updatedAt > cur.updatedAt) byCode.set(room.code, room);
     }
-    return [...byCode.values()].sort((a, b) => b.count - a.count || a.createdAt - b.createdAt);
+    // Foto de quem está em cada sala pela conta logada (presença): funciona mesmo quando quem
+    // hospeda usa um app antigo, que só publica os nomes.
+    const photos = new Map<string, Map<string, string>>(); // sala → nome → foto
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === except) continue;
+      const a = ws.deserializeAttachment() as Attachment | null;
+      const at = a?.at ?? a?.room?.code;
+      if (!a?.user?.avatar || !at) continue;
+      let m = photos.get(at);
+      if (!m) photos.set(at, (m = new Map()));
+      m.set(a.user.name, a.user.avatar);
+    }
+    return [...byCode.values()]
+      .map((r) => {
+        const m = photos.get(r.code);
+        const base = r.people?.length ? r.people : r.members.map((name) => ({ name, avatar: null as string | null }));
+        return { ...r, people: base.map((p) => ({ name: p.name, avatar: p.avatar ?? m?.get(p.name) ?? null })) };
+      })
+      .sort((a, b) => b.count - a.count || a.createdAt - b.createdAt);
   }
 
   /** A lista como `viewer` a vê: cada sala com os servidores do Discord em comum com quem hospeda. */

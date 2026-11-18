@@ -1675,7 +1675,7 @@ function pushOverlay(): void {
   const speaking = voice.speakingIds();
   const rows: OverlayRow[] = room.roster.map((p) => {
     const self = p.id === room!.selfId;
-    return { name: p.name, color: color(p.id), speaking: speaking.has(self ? 'self' : p.id), muted: self ? !voice!.micOn : p.muted };
+    return { name: p.name, color: color(p.id), avatar: p.avatar, speaking: speaking.has(self ? 'self' : p.id), muted: self ? !voice!.micOn : p.muted };
   });
   const key = JSON.stringify(rows);
   if (key === lastOverlay) return;
