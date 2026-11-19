@@ -19,15 +19,27 @@ function withStartBitrate(sdp: string, kbps: number): string {
     .join('\r\n');
 }
 
-/** Pede ao remetente áudio estéreo em bitrate de música (padrão do WebRTC é mono de voz). */
+/** Bitrate do Opus da transmissão (música/jogo). O padrão do WebRTC é ~32 kbps mono, de voz. */
+const AUDIO_BITRATE = 192_000;
+
+/**
+ * Pede áudio estéreo em bitrate de música. Aplicado nos dois lados: o espectador pede na
+ * resposta e quem transmite reforça na descrição remota (que é o que configura o encoder),
+ * para valer mesmo se o Chromium recusar a edição local ou o espectador estiver numa versão antiga.
+ */
 function withStereoOpus(sdp: string): string {
   const pt = sdp.match(/a=rtpmap:(\d+) opus\/48000/i)?.[1];
   if (!pt) return sdp;
+  const want: Record<string, string> = { stereo: '1', 'sprop-stereo': '1', maxaveragebitrate: String(AUDIO_BITRATE) };
   const re = new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`);
-  const extra = 'stereo=1;sprop-stereo=1;maxaveragebitrate=192000';
-  return re.test(sdp)
-    ? sdp.replace(re, (_m, params: string) => `a=fmtp:${pt} ${params};${extra}`)
-    : sdp.replace(new RegExp(`(a=rtpmap:${pt} opus[^\\r\\n]*)`, 'i'), `$1\r\na=fmtp:${pt} ${extra}`);
+  if (!re.test(sdp)) {
+    const extra = Object.entries(want).map(([k, v]) => `${k}=${v}`).join(';');
+    return sdp.replace(new RegExp(`(a=rtpmap:${pt} opus[^\\r\\n]*)`, 'i'), `$1\r\na=fmtp:${pt} ${extra}`);
+  }
+  return sdp.replace(re, (_m, params: string) => {
+    const kept = params.split(';').map((x) => x.trim()).filter((x) => x && !(x.split('=')[0] in want));
+    return `a=fmtp:${pt} ${[...kept, ...Object.entries(want).map(([k, v]) => `${k}=${v}`)].join(';')}`;
+  });
 }
 
 export interface Route {
@@ -127,6 +139,19 @@ export interface OutStats {
   lossPct: number;
   turn: boolean;
   capped: string; // '' ou o motivo de a qualidade estar reduzida (TURN, escolha do espectador)
+  audio: AudioStats | null;
+}
+
+/** Áudio da transmissão: bitrate real, alvo do encoder (só quem envia) e se é estéreo. */
+export interface AudioStats {
+  kbps: number;
+  targetKbps: number; // 0 quando não disponível (lado que recebe)
+  stereo: boolean;
+  concealedPct: number; // % de amostras inventadas pelo decoder por perda/atraso (lado que recebe)
+}
+
+function opusStereo(codec: any): boolean {
+  return /(^|;)\s*stereo=1/.test(codec?.sdpFmtpLine ?? '');
 }
 
 export interface InStats {
@@ -141,6 +166,7 @@ export interface InStats {
   lost: number;
   dropped: number;
   turn: boolean;
+  audio: AudioStats | null;
 }
 
 /** Lado que envia: usado pelo host e também por espectadores que fazem relay. */
@@ -150,6 +176,8 @@ export class Outgoing {
   private remoteSet = false;
   private lastBytes = 0;
   private lastTime = 0;
+  private lastAudioBytes = 0;
+  private lastAudioTime = 0;
   private quality: Quality = 'high';
   private relayed = false;
   onstate: (state: RTCPeerConnectionState) => void = () => {};
@@ -191,7 +219,7 @@ export class Outgoing {
       if (!msg.sdp || typeof msg.sdp.sdp !== 'string' || msg.sdp.sdp.length > 100_000) return;
       const startKbps = Math.round(this.opts.maxBitrate / 2000);
       try {
-        await this.pc.setRemoteDescription({ type: 'answer', sdp: withStartBitrate(msg.sdp.sdp!, startKbps) });
+        await this.pc.setRemoteDescription({ type: 'answer', sdp: withStereoOpus(withStartBitrate(msg.sdp.sdp!, startKbps)) });
       } catch {
         await this.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp.sdp });
       }
@@ -209,6 +237,17 @@ export class Outgoing {
   async applyParams(opts: EncodeOpts = this.opts): Promise<void> {
     this.opts = opts;
     for (const sender of this.pc.getSenders()) {
+      if (sender.track?.kind === 'audio') {
+        // Sem isto o áudio fica com prioridade 'low' e, quando a banda aperta, o vídeo leva
+        // quase tudo e o Opus cai para poucos kbps (chiado/"sopro" em sons tipo ruído).
+        const p = sender.getParameters();
+        if (!p.encodings?.length) continue;
+        p.encodings[0].maxBitrate = AUDIO_BITRATE;
+        p.encodings[0].priority = 'high';
+        p.encodings[0].networkPriority = 'high';
+        await sender.setParameters(p).catch((e) => console.warn('[LC] setParameters (áudio)', e));
+        continue;
+      }
       if (sender.track?.kind !== 'video') continue;
       const p = sender.getParameters();
       if (!p.encodings?.length) continue;
@@ -262,9 +301,10 @@ export class Outgoing {
   async stats(): Promise<OutStats | null> {
     const report = await this.pc.getStats().catch(() => null);
     if (!report) return null;
-    let out: any, remote: any;
+    let out: any, remote: any, aout: any;
     report.forEach((s: any) => {
       if (s.type === 'outbound-rtp' && s.kind === 'video') out = s;
+      if (s.type === 'outbound-rtp' && s.kind === 'audio') aout = s;
       if (s.type === 'remote-inbound-rtp' && s.kind === 'video') remote = s;
     });
     if (!out) return null;
@@ -274,6 +314,19 @@ export class Outgoing {
     const kbps = this.lastTime && dt > 0 ? ((out.bytesSent - this.lastBytes) * 8) / dt / 1000 : 0;
     this.lastBytes = out.bytesSent;
     this.lastTime = out.timestamp;
+    let audio: AudioStats | null = null;
+    if (aout) {
+      const adt = (aout.timestamp - this.lastAudioTime) / 1000;
+      const akbps = this.lastAudioTime && adt > 0 ? ((aout.bytesSent - this.lastAudioBytes) * 8) / adt / 1000 : 0;
+      this.lastAudioBytes = aout.bytesSent;
+      this.lastAudioTime = aout.timestamp;
+      audio = {
+        kbps: Math.round(akbps),
+        targetKbps: Math.round((aout.targetBitrate ?? 0) / 1000),
+        stereo: opusStereo(aout.codecId ? report.get(aout.codecId) : null),
+        concealedPct: 0,
+      };
+    }
     return {
       kbps: Math.round(kbps),
       fps: Math.round(out.framesPerSecond ?? 0),
@@ -287,6 +340,7 @@ export class Outgoing {
       lossPct: Math.round((remote?.fractionLost ?? 0) * 1000) / 10,
       turn: !!routeOf(report)?.relay,
       capped: this.capReason,
+      audio,
     };
   }
 
@@ -304,6 +358,8 @@ export class Incoming {
   private remoteSet = false;
   private lastBytes = 0;
   private lastTime = 0;
+  private lastAudioBytes = 0;
+  private lastAudioTime = 0;
   onstream: (stream: MediaStream) => void = () => {};
   onstate: (state: RTCPeerConnectionState) => void = () => {};
 
@@ -364,9 +420,10 @@ export class Incoming {
   async stats(): Promise<InStats | null> {
     const report = await this.pc.getStats().catch(() => null);
     if (!report) return null;
-    let inn: any, pair: any;
+    let inn: any, pair: any, ain: any;
     report.forEach((s: any) => {
       if (s.type === 'inbound-rtp' && s.kind === 'video') inn = s;
+      if (s.type === 'inbound-rtp' && s.kind === 'audio') ain = s;
       if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s;
     });
     if (!inn) return null;
@@ -376,6 +433,20 @@ export class Incoming {
     this.lastBytes = inn.bytesReceived;
     this.lastTime = inn.timestamp;
     const emitted = inn.jitterBufferEmittedCount || 0;
+    let audio: AudioStats | null = null;
+    if (ain) {
+      const adt = (ain.timestamp - this.lastAudioTime) / 1000;
+      const akbps = this.lastAudioTime && adt > 0 ? ((ain.bytesReceived - this.lastAudioBytes) * 8) / adt / 1000 : 0;
+      this.lastAudioBytes = ain.bytesReceived;
+      this.lastAudioTime = ain.timestamp;
+      const total = ain.totalSamplesReceived || 0;
+      audio = {
+        kbps: Math.round(akbps),
+        targetKbps: 0,
+        stereo: opusStereo(ain.codecId ? report.get(ain.codecId) : null),
+        concealedPct: total ? Math.round(((ain.concealedSamples ?? 0) / total) * 1000) / 10 : 0,
+      };
+    }
     return {
       kbps: Math.round(kbps),
       fps: Math.round(inn.framesPerSecond ?? 0),
@@ -388,6 +459,7 @@ export class Incoming {
       lost: inn.packetsLost ?? 0,
       dropped: inn.framesDropped ?? 0,
       turn: !!routeOf(report)?.relay,
+      audio,
     };
   }
 

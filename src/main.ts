@@ -108,6 +108,12 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 let win: BrowserWindow | null = null;
+
+/** Depuração: abre o chrome://webrtc-internals do próprio AriranhaCast (Ctrl+Shift+W). */
+function openWebrtcInternals(): void {
+  const w = new BrowserWindow({ width: 1200, height: 900, title: 'webrtc-internals — AriranhaCast', autoHideMenuBar: true });
+  void w.loadURL('chrome://webrtc-internals');
+}
 let tray: Tray | null = null;
 let pending: { id: string; audio: boolean } | null = null;
 let blocker: number | null = null;
@@ -979,6 +985,13 @@ function createWindow(): void {
     },
   });
   win.removeMenu();
+  // Só com o AriranhaCast em foco (globalShortcut tomaria o atalho do Windows inteiro).
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && !input.alt && input.key.toLowerCase() === 'w') {
+      e.preventDefault();
+      openWebrtcInternals();
+    }
+  });
 
   const query: Record<string, string> = {};
   for (const k of ['auto', 'code', 'fake', 'server', 'maxdirect', 'name', 'mic', 'ns', 'cam', 'ice', 'relayonly', 'netcheck', 'pass', 'act', 'realcap', 'gate', 'tab']) {

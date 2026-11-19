@@ -2167,6 +2167,7 @@ function renderViewers(): void {
       if (s) {
         const limit = (s.limited !== 'none' ? ` · limitado: ${s.limited}` : '') + (s.capped ? ` · reduzida: ${s.capped}` : '');
         li.append(el('div', 'detail', `${s.width}x${s.height}@${s.fps} · ${(s.kbps / 1000).toFixed(1)} Mbps · ${s.codec} ${s.hardware ? 'GPU' : 'CPU'} · ${s.rttMs} ms · ${s.turn ? 'TURN' : 'direto'}${limit}`));
+        if (s.audio) li.append(el('div', 'detail', `áudio: ${s.audio.kbps} kbps (alvo ${s.audio.targetKbps || '?'} kbps) · Opus ${s.audio.stereo ? 'estéreo' : 'mono'}`));
       }
       return li;
     }),
@@ -2409,6 +2410,9 @@ async function poll(): Promise<void> {
       `decoder: ${s.decoder || '—'}`,
       `ping: ${s.rttMs} ms · buffer: ${s.bufferMs} ms`,
       `pacotes perdidos: ${s.lost} · quadros descartados: ${s.dropped}`,
+      s.audio
+        ? `áudio: ${s.audio.kbps} kbps · Opus ${s.audio.stereo ? 'estéreo' : 'mono'}` + (s.audio.concealedPct ? ` · disfarçado: ${s.audio.concealedPct}%` : '')
+        : 'áudio: —',
       `rota: ${w.watch.via} · ${s.turn ? 'pelo TURN' : 'sem TURN'}` + (w.watch.relaying ? ` · repassando para ${w.watch.relaying}` : ''),
     ].join('\n');
     const tile = tiles.get(`screen:${id}`);
