@@ -194,7 +194,11 @@ function startAudioCap(sourceId: unknown): Promise<{ ok: boolean; reason?: strin
       const all = rest.length ? Buffer.concat([rest, d]) : d;
       const usable = all.length - (all.length % 4);
       rest = all.subarray(usable);
-      if (usable) send('lc:pcm', all.subarray(0, usable));
+      if (usable) {
+        const chunk = all.subarray(0, usable);
+        if (dumpDir) dumpWrite('1-audiocap-cru', chunk, { float: false, channels: 2, rate: 48000 });
+        send('lc:pcm', chunk);
+      }
     });
     child.on('error', (e) => settle(false, e.message));
     child.on('exit', (code) => {
@@ -403,6 +407,97 @@ function openExternal(url: unknown): boolean {
 }
 
 const clipDir = (): string => path.join(app.getPath('videos'), 'AriranhaCast');
+
+// ---------- depuração do áudio (Ctrl+Shift+A) ----------
+// Grava em WAV, sem compressão, o áudio em cada etapa do caminho, para achar onde ele estraga:
+//   1-audiocap-cru     PCM que sai do audiocap.exe (só no modo "só do aplicativo")
+//   2-enviado          faixa entregue ao WebRTC, antes do encoder Opus (quem transmite)
+//   3-recebido-*       áudio de cada transmissão assistida, já decodificado (quem assiste)
+// Os arquivos ficam em Vídeos\AriranhaCast\Depuração de áudio\<data e hora>.
+const dumpRoot = (): string => path.join(clipDir(), 'Depuração de áudio');
+const DUMP_MAX_BYTES = 400 * 1024 * 1024; // por arquivo
+type DumpFmt = { float: boolean; channels: number; rate: number };
+interface Dump {
+  fd: number;
+  bytes: number;
+  fmt: DumpFmt;
+}
+let dumpDir: string | null = null; // pasta da gravação em andamento
+const dumps = new Map<string, Dump>();
+
+function wavHeader(dataBytes: number, f: DumpFmt): Buffer {
+  const bits = f.float ? 32 : 16;
+  const align = (f.channels * bits) / 8;
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0, 'ascii');
+  h.writeUInt32LE(36 + dataBytes, 4);
+  h.write('WAVE', 8, 'ascii');
+  h.write('fmt ', 12, 'ascii');
+  h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(f.float ? 3 : 1, 20); // 3 = IEEE float, 1 = PCM inteiro
+  h.writeUInt16LE(f.channels, 22);
+  h.writeUInt32LE(f.rate, 24);
+  h.writeUInt32LE(f.rate * align, 28);
+  h.writeUInt16LE(align, 32);
+  h.writeUInt16LE(bits, 34);
+  h.write('data', 36, 'ascii');
+  h.writeUInt32LE(dataBytes, 40);
+  return h;
+}
+
+function dumpWrite(name: string, data: Uint8Array, fmt: DumpFmt): void {
+  if (!dumpDir || !/^[a-z0-9-]{1,40}$/.test(name)) return;
+  let d = dumps.get(name);
+  if (!d) {
+    try {
+      const fd = fs.openSync(path.join(dumpDir, `${name}.wav`), 'w');
+      fs.writeSync(fd, wavHeader(0, fmt));
+      d = { fd, bytes: 0, fmt };
+      dumps.set(name, d);
+    } catch (e) {
+      console.warn('[dump]', e);
+      return;
+    }
+  }
+  if (d.bytes + data.byteLength > DUMP_MAX_BYTES) return;
+  fs.writeSync(d.fd, data);
+  d.bytes += data.byteLength;
+}
+
+function dumpStart(): { ok: boolean; dir?: string; error?: string } {
+  dumpStop();
+  try {
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    const dir = path.join(dumpRoot(), stamp);
+    fs.mkdirSync(dir, { recursive: true });
+    dumpDir = dir;
+    return { ok: true, dir };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Fecha os arquivos (corrigindo o tamanho no cabeçalho) e abre a pasta. */
+function dumpStop(): { files: number; dir?: string } {
+  const dir = dumpDir;
+  dumpDir = null;
+  let files = 0;
+  for (const d of dumps.values()) {
+    try {
+      fs.writeSync(d.fd, wavHeader(d.bytes, d.fmt), 0, 44, 0);
+      fs.closeSync(d.fd);
+      files++;
+    } catch (e) {
+      console.warn('[dump]', e);
+    }
+  }
+  dumps.clear();
+  if (dir) {
+    if (files) void shell.openPath(dir);
+    else fs.rmSync(dir, { recursive: true, force: true });
+  }
+  return { files, dir: dir ?? undefined };
+}
 
 async function saveClip(data: unknown, ext: unknown, voice: unknown): Promise<{ ok: boolean; path?: string; error?: string }> {
   const kind = ext === 'mp4' || ext === 'm4a' ? ext : 'webm';
@@ -991,6 +1086,10 @@ function createWindow(): void {
       e.preventDefault();
       openWebrtcInternals();
     }
+    if (input.type === 'keyDown' && input.control && input.shift && !input.alt && input.key.toLowerCase() === 'a' && !input.isAutoRepeat) {
+      e.preventDefault();
+      send('lc:dump-toggle');
+    }
   });
 
   const query: Record<string, string> = {};
@@ -1129,6 +1228,14 @@ app.whenReady().then(() => {
   handle('lc:version', () => app.getVersion());
   handle('lc:audiocap-start', (sourceId: unknown) => startAudioCap(sourceId));
   handle('lc:audiocap-stop', () => stopAudioCap());
+  handle('lc:dump-start', () => dumpStart());
+  handle('lc:dump-stop', () => dumpStop());
+  // Amostras float32 estéreo 48 kHz vindas da página (send em vez de invoke: chega a cada 100 ms).
+  ipcMain.on('lc:dump-write', (e, name: unknown, data: unknown) => {
+    if (!trusted(e as unknown as IpcMainInvokeEvent) || typeof name !== 'string' || !(data instanceof Uint8Array)) return;
+    if (data.byteLength % 8 !== 0 || data.byteLength > 1024 * 1024) return;
+    dumpWrite(name, data, { float: true, channels: 2, rate: 48000 });
+  });
   handle('lc:gamecap-available', () => process.platform === 'win32' && fs.existsSync(path.join(__dirname, '..', 'native', 'gamecap.exe')) && typeof sharedTexture?.importSharedTexture === 'function');
   handle('lc:gamecap-start', (sourceId: unknown, fps: unknown, height: unknown, mode: unknown) => startGameCap(sourceId, fps, height, mode));
   handle('lc:nocursor-available', () => process.platform === 'win32' && fs.existsSync(path.join(__dirname, '..', 'native', 'gamecap.exe')) && typeof sharedTexture?.importSharedTexture === 'function');
@@ -1255,5 +1362,6 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   stopAudioCap();
   stopGameCap();
+  dumpStop(); // fecha os WAV da depuração com o cabeçalho certo
 });
 app.on('window-all-closed', () => app.quit());

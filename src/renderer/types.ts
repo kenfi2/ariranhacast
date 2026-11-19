@@ -21,6 +21,10 @@ export interface AriranhaBridge {
   gameCapStop(): Promise<void>;
   onGameCap(cb: (s: GameCapState) => void): void;
   onPcm(cb: (chunk: Uint8Array) => void): void;
+  dumpStart(): Promise<{ ok: boolean; dir?: string; error?: string }>;
+  dumpStop(): Promise<{ files: number; dir?: string }>;
+  dumpWrite(name: string, data: ArrayBuffer): void;
+  onDumpToggle(cb: () => void): void;
   setHotkeys(keys: { mic: string; deaf: string; clip: string; voice: string } | null): Promise<{ mic: boolean; deaf: boolean; clip: boolean; voice: boolean }>;
   onHotkey(cb: (which: 'mic' | 'deaf' | 'leave' | 'clip' | 'voice') => void): void;
   setInRoom(on: boolean, micOn: boolean): Promise<void>;
