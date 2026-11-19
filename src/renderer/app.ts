@@ -16,6 +16,7 @@ import { mountVoicePanel, mountVoiceSettings } from './voicePanel';
 import { playSfx, type Sfx } from './sounds';
 import { formatBytes, TurnMeter } from './turnmeter';
 import { Watch } from './watch';
+import { DUMP_MAX_SECONDS, dumping, onDumpAutoStop, startDump, stopDump, syncDumpTaps } from './audiodump';
 import { forPlatform, parseNotes, renderChangelog, shouldShowAfterUpdate, type ChangeEntry } from '../shared/changelog';
 
 declare const __CHANGELOG__: ChangeEntry[];
@@ -2167,6 +2168,7 @@ function renderViewers(): void {
       if (s) {
         const limit = (s.limited !== 'none' ? ` · limitado: ${s.limited}` : '') + (s.capped ? ` · reduzida: ${s.capped}` : '');
         li.append(el('div', 'detail', `${s.width}x${s.height}@${s.fps} · ${(s.kbps / 1000).toFixed(1)} Mbps · ${s.codec} ${s.hardware ? 'GPU' : 'CPU'} · ${s.rttMs} ms · ${s.turn ? 'TURN' : 'direto'}${limit}`));
+        if (s.audio) li.append(el('div', 'detail', `áudio: ${s.audio.kbps} kbps (alvo ${s.audio.targetKbps || '?'} kbps) · Opus ${s.audio.stereo ? 'estéreo' : 'mono'}`));
       }
       return li;
     }),
@@ -2386,8 +2388,34 @@ $('btn-report').onclick = async () => {
   }
 };
 
+// ---------- depuração do áudio (Ctrl+Shift+A) ----------
+function dumpSync(): Promise<void> {
+  const sent = localScreen?.getAudioTracks()[0] ?? null;
+  const received: Array<[string, MediaStreamTrack]> = [];
+  for (const [id, w] of watches) {
+    const track = w.stream?.getAudioTracks()[0];
+    if (track) received.push([room?.roster.find((p) => p.id === id)?.name ?? id, track]);
+  }
+  return syncDumpTaps(sent, received);
+}
+
+onDumpAutoStop((r) => toast(`Depuração do áudio parada no limite de ${DUMP_MAX_SECONDS / 60} min (${r.files} arquivo${r.files === 1 ? '' : 's'}). A pasta foi aberta.`));
+
+window.ariranhacast.onDumpToggle(async () => {
+  if (dumping()) {
+    const r = await stopDump();
+    toast(r.files ? `Depuração do áudio salva (${r.files} arquivo${r.files > 1 ? 's' : ''}). A pasta foi aberta.` : 'Depuração do áudio parada: não havia áudio para gravar.');
+    return;
+  }
+  const r = await startDump();
+  if (!r.ok) return toast(`Não deu para gravar a depuração do áudio: ${r.error ?? 'erro'}`);
+  await dumpSync().catch((e) => console.warn('[dump]', e));
+  toast(`Gravando o áudio para depuração (até ${DUMP_MAX_SECONDS / 60} min). Ctrl+Shift+A de novo para parar.`);
+});
+
 async function poll(): Promise<void> {
   pollCount++;
+  if (dumping()) void dumpSync().catch(() => {});
   publishLobby();
   syncPresence();
   // Retoma transmissões que o usuário estava assistindo e caíram (rede que piscou, troca de quem hospeda).
@@ -2409,6 +2437,9 @@ async function poll(): Promise<void> {
       `decoder: ${s.decoder || '—'}`,
       `ping: ${s.rttMs} ms · buffer: ${s.bufferMs} ms`,
       `pacotes perdidos: ${s.lost} · quadros descartados: ${s.dropped}`,
+      s.audio
+        ? `áudio: ${s.audio.kbps} kbps · Opus ${s.audio.stereo ? 'estéreo' : 'mono'}` + (s.audio.concealedPct ? ` · disfarçado: ${s.audio.concealedPct}%` : '')
+        : 'áudio: —',
       `rota: ${w.watch.via} · ${s.turn ? 'pelo TURN' : 'sem TURN'}` + (w.watch.relaying ? ` · repassando para ${w.watch.relaying}` : ''),
     ].join('\n');
     const tile = tiles.get(`screen:${id}`);
