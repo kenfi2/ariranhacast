@@ -493,6 +493,7 @@ body.has-lobby .home-main { flex-wrap: nowrap; align-items: stretch; justify-con
 .lr-live, .lr-full, .lr-here { padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .lr-live { background: var(--danger); color: #fff; box-shadow: 0 0 14px rgba(239, 77, 85, .5); }
 .lr-full { background: var(--amber); color: #2a1a00; }
+.lr-private { padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; background: rgba(255, 255, 255, .1); color: var(--muted); }
 .lr-here { background: rgba(45, 212, 191, .22); color: #99f6e4; }
 .lr-lock { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; background: rgba(0, 0, 0, .45); display: grid; place-items: center; }
 .lr-lock svg { width: 13px; height: 13px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

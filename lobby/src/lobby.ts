@@ -183,6 +183,7 @@ export class Lobby extends DurableObject<Env> {
           people,
           live: int(msg.live, 0, 16),
           proto: int(msg.proto, 0, 1000),
+          ...(msg.private === true ? { private: true } : {}),
           createdAt: prev?.createdAt ?? now,
           updatedAt: now,
         };
@@ -274,11 +275,25 @@ export class Lobby extends DurableObject<Env> {
       return set;
     };
     const mine = ids(viewer.id);
-    return rooms.map((r) => {
-      if (!mine.size) return { ...r, guilds: [] };
-      const theirs = ids(r.host.id);
-      return { ...r, guilds: [...mine].filter((g) => theirs.has(g)).slice(0, 10) };
-    });
+    const out: Room[] = [];
+    for (const r of rooms) {
+      const theirs = mine.size ? ids(r.host.id) : new Set<string>();
+      const guilds = [...mine].filter((g) => theirs.has(g)).slice(0, 10);
+      // Sala privada: fora da lista global. Aparece para quem hospeda, para os amigos (servidor do
+      // Discord em comum) e para quem já está nela.
+      if (r.private && r.host.id !== viewer.id && !guilds.length && !this.isIn(viewer.id, r.code)) continue;
+      out.push({ ...r, guilds });
+    }
+    return out;
+  }
+
+  /** `userId` está (por presença) na sala `code`, em algum aparelho. */
+  private isIn(userId: string, code: string): boolean {
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as Attachment | null;
+      if (a?.user?.id === userId && (a.at ?? a.room?.code) === code) return true;
+    }
+    return false;
   }
 
   /**

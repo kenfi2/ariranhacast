@@ -549,6 +549,7 @@ async function enterRoom(create: boolean, code?: string, password = '', title = 
     localStorage.setItem('ariranhacast.limit', String(limit));
   }
   const r = new Room(settings, appVersion || '0', password, limit, lobbyState.user?.avatar ?? '');
+  if (create) r.privateRoom = $<HTMLInputElement>('create-private').checked;
   my.room = r;
   try {
     if (create) await r.create(code);
@@ -757,10 +758,13 @@ const stepLimit = (d: number): void => {
 $('limit-dec').onclick = () => stepLimit(-1);
 $('limit-inc').onclick = () => stepLimit(1);
 $('create-limit').onchange = () => stepLimit(0);
-{
-  const box = $<HTMLInputElement>('create-announce');
-  box.checked = localStorage.getItem('ariranhacast.announce') !== '0';
-  box.onchange = () => localStorage.setItem('ariranhacast.announce', box.checked ? '1' : '0');
+// Padrão: sala privada e sem aviso no Discord. A escolha fica salva (chaves novas: todo mundo
+// começa com o padrão novo, mesmo quem já tinha mexido no "Notificar").
+for (const [id, key] of [['create-announce', 'ariranhacast.notify'], ['create-private', 'ariranhacast.private']] as const) {
+  const box = $<HTMLInputElement>(id);
+  const saved = localStorage.getItem(key);
+  if (saved !== null) box.checked = saved === '1';
+  box.onchange = () => localStorage.setItem(key, box.checked ? '1' : '0');
 }
 $('btn-create').onclick = () => {
   $<HTMLDialogElement>('dlg-create').close();
@@ -1064,6 +1068,7 @@ function publishLobby(): void {
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
       quiet: roomQuiet,
+      private: room.privateRoom,
     };
   }
   const key = JSON.stringify(data);
@@ -1081,6 +1086,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   const badges = el('div', 'lr-badges');
   if (r.live) badges.append(el('span', 'lr-live', r.live > 1 ? `AO VIVO ×${r.live}` : 'AO VIVO'));
   if (r.count >= r.max) badges.append(el('span', 'lr-full', 'Cheia'));
+  if (r.private) badges.append(Object.assign(el('span', 'lr-private', 'Privada'), { title: 'Não aparece na lista global: só para quem tem servidor do Discord em comum' }));
   if (r.locked) badges.insertAdjacentHTML('beforeend', `<span class="lr-lock" title="Sala com senha">${svg(LOCK_ICON)}</span>`);
   cover.append(badges);
 
@@ -1153,7 +1159,10 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
       pass.maxLength = 64;
       pass.placeholder = 'Senha';
       pass.autocomplete = 'off';
-      pass.onkeydown = (e) => e.key === 'Enter' && join.click();
+      // Sem `return`: um handler on* que devolve false cancela a tecla (não deixava digitar a senha).
+      pass.onkeydown = (e) => {
+        if (e.key === 'Enter') join.click();
+      };
       actions.append(pass);
     }
     join.onclick = () => {
@@ -1180,6 +1189,7 @@ function renderLobby(): void {
   $('home-col').hidden = gated || on;
   $('create-name-row').hidden = !on;
   $('create-announce-row').hidden = !on;
+  $('create-private-row').hidden = !on;
   $('create-card').hidden = on;
 
   const u = lobbyState.user;

@@ -48,6 +48,8 @@
     </form>
     <label id="room-name-label" hidden>Nome da sala (opcional)<input id="room-name" maxlength="40" autocomplete="off" /></label>
     <label>Máximo de pessoas<input id="room-limit" type="number" min="2" max="50" step="1" inputmode="numeric" /></label>
+    <label id="room-private-label" class="check" hidden><input id="room-private" type="checkbox" checked /> Sala privada (só amigos veem na lista)</label>
+    <label id="room-notify-label" class="check" hidden><input id="room-notify" type="checkbox" /> Notificar no canal do Discord</label>
     <button id="btn-create" class="big">Criar sala</button>
     <ul id="recent"></ul>
     <details>

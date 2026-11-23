@@ -140,6 +140,7 @@ label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; acce
 .lr-title .lr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lr-title svg { width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .lr-live { padding: 1px 6px; border-radius: 5px; background: var(--danger); font-size: 10px; font-weight: 700; }
+.lr-private { padding: 1px 6px; border-radius: 5px; background: rgba(255, 255, 255, .1); color: var(--muted); font-size: 10px; font-weight: 700; }
 .lr-sub { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; color: var(--muted); }
 .lr-sub span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lr-actions { display: flex; gap: 8px; margin-top: 10px; }

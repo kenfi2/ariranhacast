@@ -99,6 +99,8 @@ export class Room {
   roster: RosterEntry[] = [];
   /** Máximo de pessoas na sala (inclui quem hospeda). Repassado a todos, para valer também se outro assumir. */
   limit = DEFAULT_LIMIT;
+  /** Sala privada (fora da lista global do lobby). Repassado a todos, como o limite. */
+  privateRoom = false;
   private roomPeer?: Peer; // só em quem hospeda
   private self: RosterEntry;
   private members = new Map<string, Member>(); // só em quem hospeda
@@ -381,7 +383,7 @@ export class Room {
       ...[...this.members.values()].map((m) => ({ ...m.entry })),
       ...[...this.pending.values()].map((p) => ({ ...p.entry })),
     ];
-    const msg: Msg = { t: 'room', peers: this.roster, limit: this.limit };
+    const msg: Msg = { t: 'room', peers: this.roster, limit: this.limit, priv: this.privateRoom };
     for (const m of this.members.values()) if (m.conn.open) m.conn.send(msg);
     this.onroster(this.roster);
   }
@@ -612,6 +614,7 @@ export class Room {
           if (!list.some((p) => p.id === this.selfId)) return;
           this.roster = list;
           if (msg.limit !== undefined) this.limit = clampLimit(msg.limit);
+          if (typeof msg.priv === 'boolean') this.privateRoom = msg.priv;
           this.onroster(this.roster);
         } else if (msg.t === 'cmd' && msg.cmd === 'mute') {
           this.oncommand('mute');

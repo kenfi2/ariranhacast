@@ -190,9 +190,13 @@
         <label>Senha
           <input id="create-pass" type="password" maxlength="64" placeholder="Opcional" autocomplete="off" />
         </label>
+        <label id="create-private-row" class="check switch" title="Não aparece na lista global: só quem tem servidor do Discord em comum com você vê a sala (e quem tiver o código)">
+          <span>Sala privada <small class="muted">só amigos veem</small></span>
+          <input id="create-private" type="checkbox" checked />
+        </label>
         <label id="create-announce-row" class="check switch" title="Avisa no canal do Discord quando a sala abrir">
           <span>Notificar</span>
-          <input id="create-announce" type="checkbox" checked />
+          <input id="create-announce" type="checkbox" />
         </label>
         <fieldset class="host-mode">
           <legend>Onde a sala roda</legend>

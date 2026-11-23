@@ -148,7 +148,7 @@ export type Msg =
   | { t: 'welcome'; auth: string }
   | { t: 'reject'; reason: 'version' | 'password' | 'full'; version: string }
   // sala: funcionamento
-  | { t: 'room'; peers: RosterEntry[]; limit?: number }
+  | { t: 'room'; peers: RosterEntry[]; limit?: number; priv?: boolean }
   | { t: 'ice-config'; servers: RTCIceServer[] }
   | { t: 'state'; cam: boolean; screen: boolean; title: string; muted?: boolean; deaf?: boolean }
   | { t: 'cmd'; cmd: 'mute' }

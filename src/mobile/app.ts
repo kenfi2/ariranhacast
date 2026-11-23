@@ -218,6 +218,16 @@ function avatar(user: { id: string; name: string; avatar: string | null }, cls: 
   return box;
 }
 
+let roomQuiet = false; // sala criada sem aviso no canal do Discord
+
+// Padrão: sala privada e sem aviso no Discord; a escolha fica salva.
+for (const [id, key] of [['room-notify', 'ariranhacast.notify'], ['room-private', 'ariranhacast.private']] as const) {
+  const box = $<HTMLInputElement>(id);
+  const saved = localStorage.getItem(key);
+  if (saved !== null) box.checked = saved === '1';
+  box.onchange = () => localStorage.setItem(key, box.checked ? '1' : '0');
+}
+
 function publishLobby(): void {
   if (!lobbyOn()) return;
   lobby.setPresence(room?.code ?? null, 'android', !!room?.roster.find((p) => p.id === room!.selfId)?.screen); // aparece no "Online agora" de quem tem servidor em comum
@@ -233,6 +243,8 @@ function publishLobby(): void {
       people: room.roster.map((p) => ({ name: p.name, avatar: p.avatar || null })),
       live: room.roster.filter((p) => p.screen).length,
       proto: PROTO,
+      quiet: roomQuiet,
+      private: room.privateRoom,
     };
   }
   const key = JSON.stringify(data);
@@ -248,6 +260,7 @@ function lobbyRoomItem(r: LobbyRoom): HTMLLIElement {
   title.append(el('span', 'lr-name', r.name));
   if (r.locked) title.insertAdjacentHTML('beforeend', svg(LOCK_ICON));
   if (r.live) title.append(el('span', 'lr-live', 'AO VIVO'));
+  if (r.private) title.append(el('span', 'lr-private', 'Privada'));
   const sub = el('div', 'lr-sub');
   sub.append(avatar(r.host, 'avatar small'), el('span', '', `${r.count}/${r.max} pessoas · ${r.members.join(', ') || r.host.name}`));
   // Servidor do Discord em comum com quem hospeda.
@@ -308,6 +321,8 @@ function renderLobby(): void {
   $('account').hidden = !on || !lobby.state.user;
   $('name-label').hidden = on;
   $('room-name-label').hidden = !on;
+  $('room-private-label').hidden = !on;
+  $('room-notify-label').hidden = !on;
   const u = lobby.state.user;
   if (u) {
     $('acc-name').textContent = u.name;
@@ -543,6 +558,8 @@ async function enter(create: boolean, code?: string, password = '', title = ''):
     $<HTMLInputElement>('room-limit').value = String(limit);
   }
   const r = new Room(cfg, VERSION, password, limit, lobby.state.user?.avatar ?? '');
+  if (create) r.privateRoom = $<HTMLInputElement>('room-private').checked;
+  roomQuiet = create && !$<HTMLInputElement>('room-notify').checked;
   my.room = r;
   try {
     if (create) await r.create();

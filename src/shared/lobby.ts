@@ -28,6 +28,8 @@ export interface LobbyRoom {
   live: number;
   proto: number;
   createdAt: number;
+  /** Sala privada: só aparece para quem tem servidor do Discord em comum com quem hospeda. */
+  private: boolean;
   /** Servidores do Discord em comum entre você e quem hospeda (ids; nomes em LobbyState.guilds). */
   guilds: string[];
 }
@@ -73,6 +75,8 @@ export interface PublishedRoom {
   proto: number;
   /** Não avisar no canal do Discord (webhook) quando a sala abrir. */
   quiet?: boolean;
+  /** Não aparecer na lista global: só para quem tem servidor do Discord em comum (amigos). */
+  private?: boolean;
 }
 
 /**
@@ -146,6 +150,7 @@ function cleanRoom(raw: unknown): LobbyRoom | null {
     live: int(r?.live, 0, 16),
     proto: int(r?.proto, 0, 1000),
     createdAt: Number.isFinite(r?.createdAt) ? Number(r!.createdAt) : 0,
+    private: r?.private === true,
     guilds: Array.isArray(r?.guilds) ? (r.guilds as unknown[]).slice(0, 10).filter((g): g is string => typeof g === 'string' && /^\d{5,25}$/.test(g)) : [],
   };
 }

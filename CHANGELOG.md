@@ -10,6 +10,13 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.9.3 (23/11/2026)
+- Ao criar sala, a nova opção "Sala privada" (ligada por padrão) tira a sala da lista global: ela só aparece para quem tem servidor do Discord em comum com você. Quem tiver o código ou o link ainda consegue entrar.
+- "Notificar" (aviso no canal do Discord) agora vem desligado por padrão.
+- Salas privadas aparecem com o selo "Privada" na lista.
+- Android: as opções "Sala privada" e "Notificar" também aparecem ao criar sala.
+- PC: corrigido o campo de senha nos cartões das salas, que não deixava digitar nada.
+
 ## 0.9.2 (18/11/2026)
 - PC: o aviso de quem está falando por cima do jogo mostra a foto da conta de cada pessoa.
 - Nos cartões das salas, a foto de quem está na sala aparece mesmo quando quem hospeda ainda não atualizou o app.

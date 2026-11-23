@@ -46,6 +46,7 @@ export type Room = {
   people: { name: string; avatar: string | null }[]; // quem está, com a foto da conta
   live: number; // quantas transmissões ao vivo
   proto: number; // versão do protocolo da sala (app incompatível vê aviso)
+  private?: boolean; // não aparece na lista global: só para quem tem servidor do Discord em comum com quem hospeda
   guilds?: string[]; // servidores do Discord em comum entre quem hospeda e quem vê (calculado por pessoa)
   createdAt: number;
   updatedAt: number;
