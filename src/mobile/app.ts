@@ -126,7 +126,7 @@ const lobby = new LobbyClient(__WEB__ ? location.origin : __LOBBY_URL__, {
     if (sess) localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
     else localStorage.removeItem(SESSION_KEY);
   },
-});
+}, __WEB__ && /^(?:localhost|127\.0\.0\.1)$/.test(location.hostname)); // http só no teste local (wrangler dev)
 const testingParams = new URLSearchParams(location.search).has('server'); // testes automáticos: sem conta
 const lobbyOn = (): boolean => lobby.enabled && !testingParams;
 const needsLogin = (): boolean => lobbyOn() && !lobby.state.user;

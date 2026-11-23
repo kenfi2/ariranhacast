@@ -1,3 +1,4 @@
+import { playMedia } from './autoplay';
 import { Broadcast } from './broadcast';
 import { Cams } from './cams';
 import { availableCodecs } from './codecs';
@@ -23,6 +24,8 @@ declare const __CHANGELOG__: ChangeEntry[];
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
 const testing = params.has('auto');
+/** Rodando no navegador (versão web, src/web/shim.ts): só o que não depende do app instalado. */
+const WEB = window.ariranhacast.web === true;
 
 // Erros inesperados da tela vão para o arquivo de log (Configurações > Rede > Abrir pasta de logs).
 window.addEventListener('error', (e) => void window.ariranhacast.logError(`${e.message} @ ${String(e.filename).split('/').pop()}:${e.lineno}:${e.colno}${e.error?.stack ? ` | ${e.error.stack}` : ''}`));
@@ -1436,6 +1439,15 @@ function openInvite(code: string): void {
   }
   if (room?.code === code) return show('room');
   $<HTMLInputElement>('join-code').value = code;
+  if (WEB) {
+    // No navegador o áudio da sala só toca depois de um clique na página: a pessoa clica em Entrar.
+    if (!room) {
+      renderRecent();
+      $<HTMLDialogElement>('dlg-join').showModal();
+      $('btn-join').focus();
+    }
+    return toast(`Convite para a sala ${code}.`);
+  }
   void enterRoom(false, code, $<HTMLInputElement>('join-pass').value);
 }
 window.ariranhacast.onDeepLink(openInvite);
@@ -1499,7 +1511,7 @@ function makeTile(key: string, kind: 'user' | 'screen'): Tile {
 function setVideo(tile: Tile, stream: MediaStream | undefined, muted: boolean): void {
   if (tile.video.srcObject !== (stream ?? null)) {
     tile.video.srcObject = stream ?? null;
-    if (stream) void tile.video.play().catch(() => {});
+    if (stream) playMedia(tile.video);
   }
   tile.video.muted = muted;
   tile.video.hidden = !stream;
@@ -1795,11 +1807,27 @@ function openShare(isSwitch: boolean): void {
     for (const c of availableCodecs()) codecSel.add(new Option(labels[c] ?? c, c));
   }
   $<HTMLDialogElement>('dlg-share').showModal();
+  if (WEB) {
+    // Quem escolhe a tela, a janela ou a aba é o navegador, ao clicar em Transmitir.
+    void window.ariranhacast.getSources().then((list) => {
+      selected = list[0] ?? null;
+      $<HTMLButtonElement>('btn-start').disabled = !selected;
+    });
+    return;
+  }
   void window.ariranhacast.yellowBorder().then((on) => ($('share-border-tip').hidden = !on));
   void refreshSources();
 }
 
 $('btn-refresh').onclick = () => void refreshSources();
+if (WEB) {
+  // Áudio "só do aplicativo" precisa do app instalado; no navegador o som vem da aba ou da tela.
+  const sel = $<HTMLSelectElement>('opt-audio');
+  sel.querySelector('option[value="auto"]')?.remove();
+  const sys = sel.querySelector<HTMLOptionElement>('option[value="system"]');
+  if (sys) sys.textContent = 'Da aba ou da tela';
+  sel.value = 'system';
+}
 for (const b of document.querySelectorAll<HTMLButtonElement>('.share-tabs button')) {
   b.onclick = () => {
     for (const x of document.querySelectorAll('.share-tabs button')) x.classList.toggle('on', x === b);
@@ -1923,6 +1951,7 @@ function stopAppAudio(): void {
 }
 
 async function capture(source: SourceInfo, height: number, fps: number, audio: AudioMode, mode: EncodeOpts['mode']): Promise<{ stream: MediaStream; note: string }> {
+  if (WEB) return captureWeb(height, fps, audio, mode);
   let note = '';
   let appTrack: MediaStreamTrack | null = null;
   let system = audio === 'system';
@@ -2025,6 +2054,41 @@ async function capture(source: SourceInfo, height: number, fps: number, audio: A
   return { stream, note };
 }
 
+/**
+ * Versão web: o seletor do próprio navegador (tela, janela ou aba). O som vem só se o navegador
+ * entregar: aba do Chrome/Edge com "Compartilhar áudio da guia", ou tela inteira no Windows.
+ */
+async function captureWeb(height: number, fps: number, audio: AudioMode, mode: EncodeOpts['mode']): Promise<{ stream: MediaStream; note: string }> {
+  const video: MediaTrackConstraints = { frameRate: { ideal: fps, max: fps } };
+  if (height) {
+    video.height = { max: height };
+    video.width = { max: Math.round((height * 21) / 9) };
+  }
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video,
+    audio: audio === 'none' ? false : ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false, restrictOwnAudio: true } as MediaTrackConstraints),
+    selfBrowserSurface: 'exclude', // não oferece a própria aba do AriranhaCast
+    surfaceSwitching: 'include',
+    systemAudio: 'include',
+    preferCurrentTab: false,
+  } as DisplayMediaStreamOptions);
+  const surface = (stream.getVideoTracks()[0]?.getSettings() as any)?.displaySurface as string | undefined;
+  let note = '';
+  if (audio !== 'none' && !stream.getAudioTracks().length) {
+    note = surface === 'browser'
+      ? 'Sem áudio: marque "Compartilhar áudio da guia" ao escolher a aba.'
+      : 'Sem áudio: pelo navegador, o som só vem de uma aba (Chrome/Edge) ou da tela inteira no Windows. Para o som de um jogo ou programa, use o app instalado.';
+  }
+  applyHints(stream, mode);
+  return { stream, note };
+}
+
+/** Nome da transmissão na versão web (o navegador não diz o nome da janela). */
+function webTitle(stream: MediaStream): string {
+  const surface = (stream.getVideoTracks()[0]?.getSettings() as any)?.displaySurface;
+  return surface === 'monitor' ? 'Tela inteira' : surface === 'browser' ? 'Aba do navegador' : 'Janela';
+}
+
 const gameCapOn = (): boolean => localStorage.getItem('ariranhacast.gamecap') === '1';
 const cursorOn = (): boolean => localStorage.getItem('ariranhacast.cursor') === '1';
 
@@ -2092,19 +2156,21 @@ $('btn-start').onclick = async () => {
   $('btn-share-cancel').hidden = true;
   try {
     const { stream, note } = await capture(selected, height, opts.maxFps, audio, opts.mode);
+    const title = WEB ? webTitle(stream) : selected.name;
     if (switching && broadcast && localScreen) {
       const old = localScreen;
-      await broadcast.replaceStream(stream, selected.name);
+      await broadcast.replaceStream(stream, title);
       if (!stream.getVideoTracks().some((t) => isGameCaptureTrack(t))) endStream(old);
       else old.getTracks().forEach((t) => t.stop()); // a captura de jogo nova já substituiu a antiga
       if (broadcast.paused) broadcast.setPaused(false); // a fonte nova entra ao vivo
-      setLocalScreen(stream, selected.name, note);
+      setLocalScreen(stream, title, note);
       updateControls();
     } else {
-      await goLive(stream, opts, selected.name, maxDirect, note);
+      await goLive(stream, opts, title, maxDirect, note);
     }
     $<HTMLDialogElement>('dlg-share').close();
   } catch (e: any) {
+    if (WEB && e?.name === 'NotAllowedError') return; // fechou o seletor do navegador sem escolher
     toast(`Não foi possível capturar: ${e?.message ?? e}`);
   } finally {
     btn.classList.remove('busy');

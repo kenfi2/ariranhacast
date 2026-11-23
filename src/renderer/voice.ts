@@ -1,5 +1,6 @@
 import type { LinkQuality } from './link';
 import type Peer from 'peerjs';
+import { playMedia, trackAudioContext } from './autoplay';
 import type { MediaConnection } from 'peerjs';
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor';
 // @ts-expect-error binário embutido pelo esbuild (loader "binary")
@@ -137,6 +138,7 @@ export class Voice {
     private selfName: string,
     private allow: (id: string) => boolean, // o id pertence a alguém da sala?
   ) {
+    trackAudioContext(this.ctx);
     this.selfAnalyser.fftSize = 1024;
     this.micGain.connect(this.gateGain);
     this.gateGain.connect(this.sendGain);
@@ -288,7 +290,7 @@ export class Voice {
       if (r.call !== call) return;
       this.detach(r);
       r.audio.srcObject = stream;
-      void r.audio.play().catch(() => {});
+      playMedia(r.audio);
       r.source = this.ctx.createMediaStreamSource(stream);
       r.analyser = this.ctx.createAnalyser();
       r.analyser.fftSize = 1024;

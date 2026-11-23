@@ -1,5 +1,5 @@
 // Gera a página do app Android em mobile/www (o Capacitor empacota essa pasta no APK).
-// Com --web: gera a versão web (assistir pelo site) em lobby/public/web, servida pelo Worker do lobby.
+// Com --web: gera a versão web para celular em lobby/public/web/m (scripts/build-web.mjs chama assim).
 import { build } from 'esbuild';
 import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -8,7 +8,7 @@ import { loadChangelog } from './changelog.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const web = process.argv.includes('--web');
-const out = web ? join(root, 'lobby', 'public', 'web') : join(root, 'mobile', 'www');
+const out = web ? join(root, 'lobby', 'public', 'web', 'm') : join(root, 'mobile', 'www');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const lobbyUrl = typeof pkg.ariranhacast?.lobbyUrl === 'string' ? pkg.ariranhacast.lobbyUrl : '';

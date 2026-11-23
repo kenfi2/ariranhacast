@@ -8,6 +8,8 @@ export interface SourceInfo {
 }
 
 export interface AriranhaBridge {
+  /** Versão web (src/web/shim.ts): sem o que depende do app instalado. */
+  web?: boolean;
   getSources(): Promise<SourceInfo[]>;
   selectSource(id: string, audio: boolean): Promise<void>;
   setStreaming(on: boolean): Promise<void>;

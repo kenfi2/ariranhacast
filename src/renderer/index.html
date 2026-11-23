@@ -8,7 +8,7 @@
   </head>
   <body>
     <header id="topbar">
-      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="ghost small" hidden>Verificar atualizações</button></div>
+      <div class="brand"><button id="btn-top-back" type="button" class="ghost small top-back" title="Ver as salas abertas (a chamada continua)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Salas</button><img class="logo" src="icon.png" alt="" />AriranhaCast <span id="app-version" class="muted"></span><button id="btn-upd-top" type="button" class="pc-only ghost small" hidden>Verificar atualizações</button></div>
       <div id="upd" class="upd" hidden>
         <span id="upd-spin" class="spinner" hidden aria-hidden="true"></span>
         <span id="upd-text" role="status"></span>
@@ -25,7 +25,7 @@
           <div class="menu-sep"></div>
           <button id="btn-logout" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11"/></svg>Sair da conta</button>
           <div id="logout-sep" class="menu-sep" hidden></div>
-          <button id="btn-quit" type="button" role="menuitem" class="danger-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Fechar o AriranhaCast</button>
+          <button id="btn-quit" type="button" role="menuitem" class="pc-only danger-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Fechar o AriranhaCast</button>
         </div>
       </div>
     </header>
@@ -198,6 +198,7 @@
           <span>Notificar</span>
           <input id="create-announce" type="checkbox" />
         </label>
+        <p class="web-only muted">Pelo navegador, a sala fica aberta enquanto esta aba estiver aberta. Se você fechar a aba, outra pessoa da sala assume.</p>
         <fieldset class="host-mode">
           <legend>Onde a sala roda</legend>
           <label class="radio"><input type="radio" name="host-mode" value="p2p" checked /> <span>Direto entre as pessoas (P2P)</span></label>
@@ -217,15 +218,19 @@
         <div class="share-main">
           <div class="row between">
             <h2>O que você quer transmitir?</h2>
-            <button id="btn-refresh" class="ghost small">Atualizar lista</button>
+            <button id="btn-refresh" class="pc-only ghost small">Atualizar lista</button>
           </div>
-          <div class="seg share-tabs" role="tablist">
+          <div class="seg share-tabs pc-only" role="tablist">
             <button type="button" data-src="window" class="on">Janelas e jogos</button>
             <button type="button" data-src="screen">Tela inteira</button>
           </div>
           <label id="cursor-row" class="check" hidden title="Desligado: quem assiste não vê o cursor do seu mouse (janela ou tela inteira)."><input id="opt-cursor" type="checkbox" /> Mostrar o cursor do mouse na transmissão</label>
-          <div id="grid-screens" class="grid" hidden></div>
-          <div id="pane-windows">
+          <div class="web-only web-share">
+            <p>Ao clicar em <strong>Transmitir</strong>, o navegador pergunta o que mostrar: a tela inteira, uma janela ou uma aba.</p>
+            <p class="muted">Som: numa aba do Chrome/Edge, marque "Compartilhar áudio da guia"; na tela inteira, o Windows manda o som do sistema. Para o som de um jogo ou programa específico, captura de jogo e sem o cursor do mouse, use o <a href="https://github.com/kenfi2/ariranhacast/releases/latest" target="_blank" rel="noopener noreferrer">app instalado</a>.</p>
+          </div>
+          <div id="grid-screens" class="pc-only grid" hidden></div>
+          <div id="pane-windows" class="pc-only">
           <p id="share-border-tip" class="muted" hidden>No Windows 10, o próprio Windows desenha uma borda amarela na janela capturada e nenhum app consegue tirar (quem assiste não vê a borda). Para não ter a borda, transmita a tela inteira; no Windows 11 ela não aparece. Também dá para mudar em Configurações > Desempenho.</p>
           <label id="gamecap-row" class="check" hidden title="Injeta no jogo o mesmo módulo de captura do OBS Studio (assinado pela OBS Project). Funciona com jogos em DirectX 9 a 12 e OpenGL."><input id="opt-gamecap" type="checkbox" /> Captura de jogo (como o OBS e o Discord): sem borda e mais leve. Experimental; se o jogo não aceitar, usa a captura de janela.</label>
           <div id="grid-windows" class="grid"></div>
@@ -282,7 +287,7 @@
               <option value="none">Sem áudio</option>
             </select>
           </label>
-          <p class="muted">Em "só do aplicativo", uma janela leva apenas o som do programa dela; a tela inteira leva tudo, menos as vozes do AriranhaCast.</p>
+          <p class="muted pc-only">Em "só do aplicativo", uma janela leva apenas o som do programa dela; a tela inteira leva tudo, menos as vozes do AriranhaCast.</p>
           <label>Conexões diretas
             <select id="opt-direct">
               <option value="3">3</option>
@@ -317,9 +322,9 @@
         </label>
         <div class="row between">
           <span id="upd-set-text" class="muted"></span>
-          <button id="btn-upd-check" type="button" class="ghost" hidden>Verificar atualizações</button>
+          <button id="btn-upd-check" type="button" class="pc-only ghost" hidden>Verificar atualizações</button>
         </div>
-        <div id="fw-row" class="row between" hidden>
+        <div id="fw-row" class="pc-only row between" hidden>
           <span id="fw-text" class="muted"></span>
           <button id="btn-fw" type="button" class="ghost">Liberar no Firewall</button>
         </div>
@@ -328,12 +333,13 @@
           <div id="voice-settings"></div>
         </section>
         <section data-pane="clipes" hidden>
-        <div class="row hot">
+        <p class="web-only muted">No navegador não há atalhos globais (eles só existem no app instalado). Os clipes são baixados para a pasta de downloads.</p>
+        <div class="row hot pc-only">
           <label>Atalho: microfone <input id="set-hot-mic" readonly placeholder="clique e pressione" /></label>
           <label>Atalho: silenciar vozes <input id="set-hot-deaf" readonly placeholder="clique e pressione" /></label>
         </div>
         <div class="row hot">
-          <label>Atalho: salvar clipe <input id="set-hot-clip" readonly placeholder="clique e pressione" /></label>
+          <label class="pc-only">Atalho: salvar clipe <input id="set-hot-clip" readonly placeholder="clique e pressione" /></label>
           <label>Replay para clipes
             <select id="set-clip-secs">
               <option value="0">Desligado</option>
@@ -343,7 +349,7 @@
           </label>
         </div>
         <div class="row hot">
-          <label>Atalho: salvar clipe de voz <input id="set-hot-voice" readonly placeholder="clique e pressione" /></label>
+          <label class="pc-only">Atalho: salvar clipe de voz <input id="set-hot-voice" readonly placeholder="clique e pressione" /></label>
           <label>Replay de voz
             <select id="set-voice-secs">
               <option value="0">Desligado</option>
@@ -354,7 +360,7 @@
           </label>
         </div>
         <label class="check"><input id="set-clip-watched" type="checkbox" /> Clipar também as transmissões que eu assisto</label>
-        <p class="muted">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho. Os clipes vão para a pasta Vídeos/AriranhaCast; o replay fica só na memória e usa um pouco de CPU. O clipe de voz guarda só o áudio da conversa (você e os amigos); avise o pessoal antes de gravar.</p>
+        <p class="muted pc-only">Os atalhos funcionam mesmo com o jogo em primeiro plano, enquanto você estiver numa sala. Backspace remove o atalho. Os clipes vão para a pasta Vídeos/AriranhaCast; o replay fica só na memória e usa um pouco de CPU. O clipe de voz guarda só o áudio da conversa (você e os amigos); avise o pessoal antes de gravar.</p>
         </section>
         <section data-pane="rede" hidden>
         <label>Servidor TURN (opcional): JSON ou URL de credenciais
@@ -367,11 +373,12 @@
         <div class="row">
           <button id="btn-netcheck" type="button" class="ghost">Testar minha rede</button>
           <button id="btn-report" type="button" class="ghost">Copiar relatório de conexão</button>
-          <button id="btn-logs" type="button" class="ghost" title="Erros do app ficam anotados em um arquivo neste PC (nada é enviado)">Abrir pasta de logs</button>
+          <button id="btn-logs" type="button" class="pc-only ghost" title="Erros do app ficam anotados em um arquivo neste PC (nada é enviado)">Abrir pasta de logs</button>
         </div>
         <pre id="netcheck-out" class="netcheck" hidden></pre>
         </section>
         <section data-pane="desempenho" hidden>
+        <div class="pc-only">
         <label class="check"><input id="set-hwaccel" type="checkbox" /> Usar aceleração de hardware (placa de vídeo)</label>
         <p class="muted">Desligue se o PC travar ou engasgar enquanto transmite um jogo ou filme, ou se a placa de vídeo já estiver no limite. A interface e a codificação do vídeo passam para o processador.</p>
         <label>Método de captura
@@ -382,14 +389,16 @@
           </select>
         </label>
         <p class="muted">Automático: a tela inteira é capturada sem a borda do Windows; janelas usam o método moderno (no Windows 10 a janela capturada ganha uma borda amarela que nenhum app consegue tirar). Compatível: sem borda em nada, mas jogos e janelas aceleradas podem sair pretos; use se alguma janela aparecer preta ou nem aparecer na lista (ex.: navegador sem aceleração de hardware).</p>
-        <div id="gfx-restart" class="row between" hidden>
+        <div id="gfx-restart" class="pc-only row between" hidden>
           <span class="muted">Reinicie o AriranhaCast para aplicar.</span>
           <button id="btn-gfx-restart" type="button" class="ghost">Reiniciar agora</button>
+        </div>
         </div>
         <label class="check"><input id="set-smooth" type="checkbox" /> Reprodução suave nas transmissões que eu assisto</label>
         <p class="muted">Guarda um pouquinho de vídeo antes de exibir (cerca de 0,2 s a mais de atraso). Deixa filmes fluidos, sem engasgos nem tremidas, quando a rede oscila. Desligado = atraso mínimo, melhor para jogos. Vale a partir da próxima transmissão que você abrir.</p>
         </section>
         <section data-pane="extras" hidden>
+          <div class="pc-only">
           <h3>Overlay</h3>
         <label class="check"><input id="set-ov-on" type="checkbox" /> Mostrar quem está falando por cima do jogo</label>
         <div class="row hot">
@@ -409,6 +418,7 @@
           </label>
         </div>
         <p class="muted">O overlay aparece sobre jogos em janela ou "tela cheia sem bordas". Em tela cheia exclusiva o Windows não deixa nenhuma janela ficar por cima.</p>
+          </div>
           <h3>Chat</h3>
         <label>Chave do Giphy para procurar GIFs (opcional) <input id="set-giphy" maxlength="64" autocomplete="off" spellcheck="false" placeholder="grátis em developers.giphy.com" /></label>
         </section>

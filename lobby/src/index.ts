@@ -141,7 +141,7 @@ async function webAsset(req: Request, assets: Fetcher): Promise<Response> {
   out.headers.set("X-Frame-Options", "DENY");
   out.headers.set("X-Content-Type-Options", "nosniff");
   out.headers.set("Referrer-Policy", "no-referrer");
-  out.headers.set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(), geolocation=()");
+  out.headers.set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), geolocation=()");
   // index.html sempre fresco (o app.js muda a cada versão).
   if ((res.headers.get("Content-Type") ?? "").startsWith("text/html")) out.headers.set("Cache-Control", "no-cache");
   return out;

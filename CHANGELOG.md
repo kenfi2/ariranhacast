@@ -10,6 +10,12 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.11.0 (23/11/2026)
+- O site agora tem o mesmo visual do app do PC: salas em cartões, servidores, amigos online, chat, câmera e transmissões. No celular, o site continua com o visual do app Android.
+- Pelo site também dá para criar sala e transmitir a tela: o navegador pergunta se é a tela inteira, uma janela ou uma aba. O som vai junto numa aba do Chrome/Edge (marcando "Compartilhar áudio da guia") ou na tela inteira no Windows.
+- No site ficam de fora só as coisas que dependem do app instalado: captura de jogo, som só de um programa, transmissão sem o cursor, atalhos globais e overlay. Os clipes são baixados pelo navegador.
+- No site, se o navegador bloquear o som ao entrar na sala, aparece "Clique em qualquer lugar para ativar o som".
+
 ## 0.10.0 (23/11/2026)
 - Novo: dá para entrar nas salas e assistir às transmissões direto pelo navegador, sem instalar nada, no endereço do AriranhaCast (/web/). Pelo site você entra com a conta do Discord, conversa na call e assiste às lives; para criar sala ou transmitir, continua sendo pelo app.
 - O link de convite de uma sala agora tem o botão "Assistir no navegador".
