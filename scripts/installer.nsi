@@ -3,6 +3,7 @@
 Unicode true
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+!include "MUI2.nsh"
 
 !ifndef NEEDMB
   !define NEEDMB 450
@@ -17,16 +18,30 @@ OutFile "${OUT}"
 RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\${APP}"
 SetCompressor /SOLID lzma
-Icon "..\assets\icon.ico"
-UninstallIcon "..\assets\icon.ico"
 ShowInstDetails nevershow
 ShowUninstDetails nevershow
-AutoCloseWindow true
 BrandingText "${APP} ${VERSION}"
 
-Page instfiles
-UninstPage uninstConfirm
-UninstPage instfiles
+; Telas: progresso e, no fim, "Pronto" com a opção de abrir o app (antes a janela fechava sozinha
+; e quem instalava pela primeira vez não sabia onde achar o AriranhaCast).
+!define MUI_ICON "..\assets\icon.ico"
+!define MUI_UNICON "..\assets\icon.ico"
+!define MUI_FINISHPAGE_TITLE "AriranhaCast instalado"
+!define MUI_FINISHPAGE_TEXT "Para abrir depois, use o atalho AriranhaCast na Área de Trabalho ou procure $\"AriranhaCast$\" no menu Iniciar."
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "Abrir o AriranhaCast agora"
+!define MUI_FINISHPAGE_RUN_FUNCTION RunApp
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "PortugueseBR"
+
+; Abre pelo Explorer (como um clique no atalho): o app não herda nada do instalador.
+Function RunApp
+  SetOutPath "$INSTDIR"
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\${EXE}"'
+FunctionEnd
 
 ; Espera o AriranhaCast fechar (a atualização automática chama o instalador quando o app sai).
 Function WaitForApp
@@ -185,8 +200,11 @@ Section "Install"
   StrCpy $Swapped 0
   RMDir /r "$Backup"
 
-  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\${EXE}"
-  CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}"
+  ; Atalhos com a pasta do app como "Iniciar em" (antes ficava a pasta temporária).
+  SetOutPath "$INSTDIR"
+  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  SetOutPath "$TEMP"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP}"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${APP}"
@@ -197,14 +215,13 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
 SectionEnd
 
-; Abre o app ao terminar: sempre na instalação normal; na silenciosa só com --force-run.
+; Atualização automática (silenciosa, com --force-run): reabre o app sozinha. Na instalação
+; normal quem abre é a tela final ("Abrir o AriranhaCast agora", marcada por padrão).
 Function .onInstSuccess
   ${GetParameters} $R0
   ClearErrors
   ${GetOptions} $R0 "--force-run" $R1
   ${IfNot} ${Errors}
-    Exec '"$INSTDIR\${EXE}"'
-  ${ElseIfNot} ${Silent}
     Exec '"$INSTDIR\${EXE}"'
   ${EndIf}
 FunctionEnd

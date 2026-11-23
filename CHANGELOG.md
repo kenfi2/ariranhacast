@@ -10,6 +10,9 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.9.4 (23/11/2026)
+- PC: o instalador agora termina numa tela "AriranhaCast instalado", com a opção "Abrir o AriranhaCast agora" (marcada) e explicando onde ficam os atalhos. Antes a janela fechava sozinha e não ficava claro como abrir o app.
+
 ## 0.9.3 (23/11/2026)
 - Ao criar sala, a nova opção "Sala privada" (ligada por padrão) tira a sala da lista global: ela só aparece para quem tem servidor do Discord em comum com você. Quem tiver o código ou o link ainda consegue entrar.
 - "Notificar" (aviso no canal do Discord) agora vem desligado por padrão.
