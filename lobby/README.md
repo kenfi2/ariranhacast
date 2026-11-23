@@ -101,3 +101,10 @@ Mensagens do WebSocket: o servidor manda `{type:"welcome", user, rooms}` e `{typ
 ## Limites do plano gratuito
 
 100 mil requisições/dia nos Durable Objects (cada mudança numa sala é uma). Se estourar, para de funcionar até 00:00 UTC (21h em Brasília), sem cobrança. O app continua abrindo sem o lobby (com a conta salva) e dá para entrar por código.
+
+## Versão web (assistir pelo site)
+
+O Worker também serve a versão web do app em `/web/` (e `/` redireciona para lá). É a mesma página do
+app Android, gerada por `node scripts/build-mobile.mjs --web` em `lobby/public/web` — o workflow
+`deploy-lobby.yml` faz isso antes do deploy. O login pelo site volta para `/web/#auth?…` (o token vai
+no fragmento, que não chega ao servidor). Para testar localmente: gere a versão web e rode `npx wrangler dev`.

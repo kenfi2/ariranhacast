@@ -3,7 +3,8 @@ name: Deploy lobby
 on:
   push:
     branches: [main]
-    paths: ["lobby/**", ".github/workflows/deploy-lobby.yml"]
+    # A versão web (lobby/public/web) sai do código do app Android: muda junto com ele e a cada versão.
+    paths: ["lobby/**", "src/mobile/**", "src/shared/**", "src/renderer/**", "scripts/build-mobile.mjs", "package.json", "CHANGELOG.md", ".github/workflows/deploy-lobby.yml"]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +20,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: lobby/package-lock.json
+          cache-dependency-path: |
+            lobby/package-lock.json
+            package-lock.json
+
+      # Versão web (assistir pelo site): só precisa do esbuild e das libs do app, não do Electron.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: node scripts/build-mobile.mjs --web
 
       - run: npm ci
         working-directory: lobby

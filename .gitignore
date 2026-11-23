@@ -7,3 +7,4 @@ mobile/www/
 .dev.vars*
 *.jks
 *.keystore
+lobby/public/

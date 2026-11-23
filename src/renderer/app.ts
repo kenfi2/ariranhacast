@@ -1302,7 +1302,9 @@ function renderOnline(): void {
         b.classList.toggle('in-room', !!o.room);
         const r = o.room ? lobbyState.rooms.find((x) => x.code === o.room) : undefined;
         const where = o.live ? (room?.code === o.room ? 'transmitindo na sua sala' : r ? `transmitindo na sala ${r.name}` : 'transmitindo') : o.room ? (room?.code === o.room ? 'na sua sala' : r ? `na sala ${r.name}` : 'numa sala') : 'na tela inicial';
-        const dev = o.devices.includes('android') ? (o.devices.includes('pc') ? ' · PC e celular' : ' · celular') : '';
+        const names = { pc: 'PC', android: 'celular', web: 'navegador' } as Record<string, string>;
+        const devs = o.devices.map((d) => names[d]).filter(Boolean);
+        const dev = devs.length > 1 || o.devices[0] !== 'pc' ? ` · ${devs.join(' e ')}` : '';
         b.title = `${o.name}\n${where}${dev}${o.room ? '\nClique para ver a sala' : ''}`;
         b.append(avatar(o, 'friend-av'));
         // Um selo só: tela = transmitindo, alto-falante = em call, bolinha = online na tela inicial.

@@ -24,7 +24,7 @@ function escapeHtml(s: string): string {
 }
 
 /** Página mostrada no navegador ao fim do login. `redirect` = link para voltar ao app. */
-function page(title: string, message: string, status = 200, redirect?: string, extra?: { href: string; label: string }): Response {
+function page(title: string, message: string, status = 200, redirect?: string, extras: { href: string; label: string }[] = []): Response {
   const link = redirect ? escapeHtml(redirect) : "";
   const html = `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
@@ -42,7 +42,7 @@ ${redirect ? `<meta http-equiv="refresh" content="0;url=${link}">` : ""}
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(message)}</p>
   ${redirect ? `<a href="${link}">Abrir o AriranhaCast</a>` : ""}
-  ${extra ? `<p><a class="ghost" href="${escapeHtml(extra.href)}">${escapeHtml(extra.label)}</a></p>` : ""}
+  ${extras.map((x) => `<p><a class="ghost" href="${escapeHtml(x.href)}">${escapeHtml(x.label)}</a></p>`).join("")}
 </main></body></html>`;
   return new Response(html, {
     status,
@@ -67,7 +67,7 @@ function randomHex(bytes: number): string {
 
 /** Volta do provedor (?code=…&state=…): troca o código, lê a conta e cria a sessão deste aparelho. */
 async function callback(req: Request, url: URL, env: Env, lobby: DurableObjectStub<import("./lobby").Lobby>): Promise<Response> {
-  const [cookieState, appState, providerId] = (req.headers.get("Cookie")?.match(/(?:^|;\s*)oauth=([^;]+)/)?.[1] ?? "").split(".");
+  const [cookieState, appState, providerId, target] = (req.headers.get("Cookie")?.match(/(?:^|;\s*)oauth=([^;]+)/)?.[1] ?? "").split(".");
   const provider = PROVIDERS.find((p) => p.id === providerId);
 
   const oauthError = url.searchParams.get("error");
@@ -123,8 +123,28 @@ async function callback(req: Request, url: URL, env: Env, lobby: DurableObjectSt
     }
   }
 
+  // Login pela versão web: volta para o site, com o token no fragmento (#), que não vai ao servidor
+  // nem aparece no Referer. Endereço fixo do próprio lobby: nada de redirecionar para fora.
+  if (target === "web") {
+    const back = `${url.origin}/web/#auth?token=${sessionToken}&app_state=${encodeURIComponent(appState)}`;
+    return page("Login concluído", "Voltando para o AriranhaCast…", 200, back);
+  }
   const deepLink = `${APP_SCHEME}://auth?token=${sessionToken}&app_state=${encodeURIComponent(appState)}`;
   return page("Login concluído", "Voltando para o AriranhaCast… pode fechar esta aba.", 200, deepLink);
+}
+
+/** Arquivo da versão web, com cabeçalhos de segurança (a página também traz o próprio CSP). */
+async function webAsset(req: Request, assets: Fetcher): Promise<Response> {
+  if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "method not allowed" }, 405);
+  const res = await assets.fetch(req);
+  const out = new Response(res.body, res);
+  out.headers.set("X-Frame-Options", "DENY");
+  out.headers.set("X-Content-Type-Options", "nosniff");
+  out.headers.set("Referrer-Policy", "no-referrer");
+  out.headers.set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(), geolocation=()");
+  // index.html sempre fresco (o app.js muda a cada versão).
+  if ((res.headers.get("Content-Type") ?? "").startsWith("text/html")) out.headers.set("Cache-Control", "no-cache");
+  return out;
 }
 
 export default {
@@ -160,7 +180,7 @@ export default {
           status: 302,
           headers: {
             Location: auth.toString(),
-            "Set-Cookie": `oauth=${state}.${appState}.${provider.id}; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Path=/auth`,
+            "Set-Cookie": `oauth=${state}.${appState}.${provider.id}.${url.searchParams.get("target") === "web" ? "web" : "app"}; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Path=/auth`,
             "Cache-Control": "no-store",
           },
         });
@@ -199,8 +219,13 @@ export default {
         if (m) {
           const code = m[1].toUpperCase();
           const download = /^https:\/\//.test(env.DOWNLOAD_URL ?? "") ? env.DOWNLOAD_URL! : "https://github.com/kenfi2/ariranhacast/releases/latest";
-          return page(`Sala ${code}`, "Abrindo o AriranhaCast… Se nada acontecer, toque no botão abaixo.", 200, `${APP_SCHEME}://entrar/${code}`, { href: download, label: "Ainda não tenho o app" });
+          const extras = [{ href: download, label: "Ainda não tenho o app" }];
+          if (env.ASSETS) extras.unshift({ href: `/web/#entrar/${code}`, label: "Assistir no navegador" });
+          return page(`Sala ${code}`, "Abrindo o AriranhaCast… Se nada acontecer, toque no botão abaixo.", 200, `${APP_SCHEME}://entrar/${code}`, extras);
         }
+        // Versão web: o site do AriranhaCast.
+        if (env.ASSETS && (url.pathname === "/" || url.pathname === "/web")) return Response.redirect(`${url.origin}/web/`, 302);
+        if (env.ASSETS && url.pathname.startsWith("/web/")) return webAsset(req, env.ASSETS);
         return json({ error: "not found" }, 404);
       }
     }

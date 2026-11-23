@@ -13,10 +13,14 @@ import { forPlatform, parseNotes, renderChangelog, shouldShowAfterUpdate, type C
 import { callStart, callStop, deviceStatus, fetchText, installUpdate, keepScreenOn, native, onAppLink, onFullscreenExit, openBrowser, setFullscreen, setSpeaker } from './native';
 
 declare const __VERSION__: string;
+/** Versão web (assistir pelo site, servida pelo lobby em /web/): mesmo código do app Android. */
+declare const __WEB__: boolean;
 declare const __LOBBY_URL__: string;
 declare const __UPDATE_URL__: string;
 declare const __CHANGELOG__: ChangeEntry[];
-const VERSION = `${__VERSION__}-android`;
+const VERSION = `${__VERSION__}-${__WEB__ ? 'web' : 'android'}`;
+const DEVICE = __WEB__ ? 'web' : 'android';
+if (__WEB__) document.body.classList.add('web');
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] {
@@ -109,7 +113,8 @@ const store = {
 };
 
 const SESSION_KEY = 'ariranhacast.session';
-const lobby = new LobbyClient(__LOBBY_URL__, {
+// Na web, o lobby é o próprio site (mesma origem).
+const lobby = new LobbyClient(__WEB__ ? location.origin : __LOBBY_URL__, {
   load(): Session | null {
     try {
       return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null');
@@ -128,7 +133,7 @@ const needsLogin = (): boolean => lobbyOn() && !lobby.state.user;
 /** Com conta: o nome vem dela, com "(celular)" para não confundir com a mesma pessoa no PC. */
 function myName(): string {
   const u = lobby.state.user;
-  return u ? `${u.name.slice(0, 14)} (celular)` : store.name || `Convidado${Math.floor(Math.random() * 900 + 100)}`;
+  return u ? `${u.name.slice(0, 14)} (${__WEB__ ? 'navegador' : 'celular'})` : store.name || `Convidado${Math.floor(Math.random() * 900 + 100)}`;
 }
 
 function settings(): Settings {
@@ -230,7 +235,7 @@ for (const [id, key] of [['room-notify', 'ariranhacast.notify'], ['room-private'
 
 function publishLobby(): void {
   if (!lobbyOn()) return;
-  lobby.setPresence(room?.code ?? null, 'android', !!room?.roster.find((p) => p.id === room!.selfId)?.screen); // aparece no "Online agora" de quem tem servidor em comum
+  lobby.setPresence(room?.code ?? null, DEVICE, !!room?.roster.find((p) => p.id === room!.selfId)?.screen); // aparece no "Online agora" de quem tem servidor em comum
   let data: PublishedRoom | null = null;
   if (room?.isHost && room.code) {
     data = {
@@ -337,11 +342,13 @@ function renderLobby(): void {
         ...lobby.state.providers.map((p) => {
           const b = el('button', `p-${p.id}`, `Entrar com ${p.label}`);
           b.type = 'button';
-          b.onclick = () =>
+          b.onclick = () => {
+            if (__WEB__) return webLogin(p.id);
             void openBrowser(lobby.loginUrl(p.id)).then((ok) => {
               if (ok) $('login-wait').hidden = false;
               else toast('Não foi possível abrir o navegador.');
             });
+          };
           return b;
         }),
       );
@@ -409,6 +416,55 @@ $('btn-logout').onclick = () => {
   if (room) return toast('Saia da sala antes de sair da conta.');
   void lobby.logout();
 };
+
+// ---------- versão web ----------
+// O login sai do site (Discord) e volta para /web/#auth?token=…&app_state=…; o estado do login
+// fica no sessionStorage enquanto isso (só nesta aba). Convites chegam como /web/#entrar/CÓDIGO.
+const PENDING_KEY = 'ariranhacast.pending-login';
+const INVITE_KEY = 'ariranhacast.pending-invite';
+
+function webLogin(provider: string): void {
+  const url = lobby.loginUrl(provider, true);
+  sessionStorage.setItem(PENDING_KEY, JSON.stringify(lobby.pending));
+  $('login-wait').hidden = false;
+  location.assign(url);
+}
+
+async function startWeb(): Promise<void> {
+  const hash = location.hash;
+  // Tira o token/código da barra de endereço (e do histórico) antes de qualquer coisa.
+  if (hash) history.replaceState(null, '', location.pathname + location.search);
+  const invite = /^#(?:entrar|join)\/([A-Za-z0-9]{4,16})\/?$/i.exec(hash);
+  if (invite) sessionStorage.setItem(INVITE_KEY, normalizeCode(invite[1]));
+  if (/^#auth\?/.test(hash)) {
+    try {
+      lobby.pending = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? 'null');
+    } catch {
+      lobby.pending = null;
+    }
+    sessionStorage.removeItem(PENDING_KEY);
+    if (await lobby.completeLogin(`ariranhacast://auth?${hash.slice(6)}`)) {
+      offerInvite();
+      return;
+    }
+  }
+  await lobby.start();
+  offerInvite();
+}
+
+/**
+ * Convite aberto no site: deixa o código pronto, mas espera o clique em "Entrar" (o navegador só
+ * deixa tocar o áudio da sala depois de um clique na página).
+ */
+function offerInvite(): void {
+  const code = sessionStorage.getItem(INVITE_KEY);
+  if (!code) return;
+  if (needsLogin()) return toast('Entre com a sua conta para abrir o convite.');
+  sessionStorage.removeItem(INVITE_KEY);
+  $<HTMLInputElement>('code').value = code;
+  $<HTMLInputElement>('code').focus();
+  toast(`Convite para a sala ${code}: toque em Entrar.`, 6000);
+}
 
 // ---------- atualização do app ----------
 // Cada release publica o APK e o latest-android.json ({version, apk, sha256}). O app confere ao
@@ -1174,7 +1230,8 @@ renderBar();
 show('home');
 $<HTMLInputElement>('room-limit').value = String(clampLimit(Number(localStorage.getItem('ariranhacast.limit') ?? DEFAULT_LIMIT)));
 renderLobby();
-void lobby.start();
+if (__WEB__) void startWeb();
+else void lobby.start();
 void checkUpdate();
 // Ao voltar para o app (estava em segundo plano), confere de novo, no máximo a cada 6 h.
 document.addEventListener('visibilitychange', () => {

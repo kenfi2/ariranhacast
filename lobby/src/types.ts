@@ -2,6 +2,8 @@ import type { Lobby } from "./lobby";
 
 export interface Env {
   LOBBY: DurableObjectNamespace<Lobby>;
+  /** Versão web (assistir pelo site): arquivos gerados por scripts/build-mobile.mjs --web em lobby/public. */
+  ASSETS?: Fetcher;
   // Cada provedor só aparece no app se o Client ID e o segredo estiverem configurados.
   DISCORD_CLIENT_ID?: string;
   DISCORD_CLIENT_SECRET?: string; // wrangler secret put DISCORD_CLIENT_SECRET
@@ -30,7 +32,7 @@ export type Online = {
   avatar: string | null;
   room: string | null; // código da sala em que está, ou null (na tela inicial)
   live: boolean; // transmitindo a tela
-  devices: string[]; // "pc", "android"
+  devices: string[]; // "pc", "android", "web"
   guilds: string[]; // servidores em comum
 };
 

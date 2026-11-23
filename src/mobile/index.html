@@ -46,11 +46,12 @@
       <label id="pass-label" hidden>Senha da sala<input id="pass" type="password" maxlength="64" /></label>
       <button class="primary big" type="submit">Entrar</button>
     </form>
-    <label id="room-name-label" hidden>Nome da sala (opcional)<input id="room-name" maxlength="40" autocomplete="off" /></label>
-    <label>Máximo de pessoas<input id="room-limit" type="number" min="2" max="50" step="1" inputmode="numeric" /></label>
-    <label id="room-private-label" class="check" hidden><input id="room-private" type="checkbox" checked /> Sala privada (só amigos veem na lista)</label>
-    <label id="room-notify-label" class="check" hidden><input id="room-notify" type="checkbox" /> Notificar no canal do Discord</label>
-    <button id="btn-create" class="big">Criar sala</button>
+    <label id="room-name-label" class="host-only" hidden>Nome da sala (opcional)<input id="room-name" maxlength="40" autocomplete="off" /></label>
+    <label class="host-only">Máximo de pessoas<input id="room-limit" type="number" min="2" max="50" step="1" inputmode="numeric" /></label>
+    <label id="room-private-label" class="check host-only" hidden><input id="room-private" type="checkbox" checked /> Sala privada (só amigos veem na lista)</label>
+    <label id="room-notify-label" class="check host-only" hidden><input id="room-notify" type="checkbox" /> Notificar no canal do Discord</label>
+    <button id="btn-create" class="big host-only">Criar sala</button>
+    <p class="web-only muted center">Aqui no site dá para entrar nas salas, conversar e assistir às transmissões. Para criar sala ou transmitir, <a href="https://github.com/kenfi2/ariranhacast/releases/latest" target="_blank" rel="noopener noreferrer">baixe o AriranhaCast</a>.</p>
     <ul id="recent"></ul>
     <details>
       <summary>Avançado</summary>

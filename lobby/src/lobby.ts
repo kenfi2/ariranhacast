@@ -209,7 +209,7 @@ export class Lobby extends DurableObject<Env> {
       // Onde a pessoa está agora (sala em que entrou, ou nenhuma) e de que aparelho.
       case "presence": {
         const at = typeof msg.room === "string" && CODE_RE.test(msg.room.toUpperCase()) ? msg.room.toUpperCase() : null;
-        const device = msg.device === "android" ? "android" : "pc";
+        const device = msg.device === "android" || msg.device === "web" ? msg.device : "pc";
         const live = at !== null && msg.live === true; // transmitindo a tela na sala
         if (att.at === at && att.device === device && !!att.live === live) break;
         ws.serializeAttachment({ ...att, at, device, live } satisfies Attachment);

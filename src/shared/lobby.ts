@@ -46,7 +46,7 @@ export interface LobbyOnline {
   avatar: string | null;
   room: string | null; // sala em que está (código) ou null
   live: boolean; // transmitindo a tela
-  devices: string[]; // "pc", "android"
+  devices: string[]; // "pc", "android", "web"
   guilds: string[];
 }
 
@@ -166,7 +166,7 @@ function cleanOnline(raw: unknown): LobbyOnline | null {
     avatar: user.avatar,
     room: CODE_RE.test(room) ? room : null,
     live: CODE_RE.test(room) && o?.live === true,
-    devices: Array.isArray(o?.devices) ? (o.devices as unknown[]).filter((d): d is string => d === 'pc' || d === 'android') : [],
+    devices: Array.isArray(o?.devices) ? (o.devices as unknown[]).filter((d): d is string => d === 'pc' || d === 'android' || d === 'web') : [],
     guilds: Array.isArray(o?.guilds) ? (o.guilds as unknown[]).slice(0, 10).filter((g): g is string => typeof g === 'string' && /^\d{5,25}$/.test(g)) : [],
   };
 }
@@ -203,7 +203,7 @@ export class LobbyClient {
   private pendingState: { value: string; until: number } | null = null;
   private hosting: PublishedRoom | null = null;
   private lastSent = '';
-  private presence: { room: string | null; device: 'pc' | 'android'; live: boolean } = { room: null, device: 'pc', live: false };
+  private presence: { room: string | null; device: 'pc' | 'android' | 'web'; live: boolean } = { room: null, device: 'pc', live: false };
   private lastPresence = '';
 
   constructor(
@@ -241,11 +241,22 @@ export class LobbyClient {
     this.cleanup();
   }
 
-  /** URL a abrir no navegador para entrar com `provider`. Vale por 10 minutos. */
-  loginUrl(provider: string): string {
+  /**
+   * URL a abrir no navegador para entrar com `provider`. Vale por 10 minutos.
+   * `web` = versão web: o login volta para o site (/web/#auth?…) em vez do link ariranhacast://.
+   */
+  loginUrl(provider: string, web = false): string {
     const value = randomState();
     this.pendingState = { value, until: Date.now() + 10 * 60_000 };
-    return `${this.baseUrl}/auth/login?provider=${encodeURIComponent(provider)}&app_state=${value}`;
+    return `${this.baseUrl}/auth/login?provider=${encodeURIComponent(provider)}&app_state=${value}${web ? '&target=web' : ''}`;
+  }
+
+  /** Versão web: o login sai da página e volta; o estado pendente é guardado e devolvido por aqui. */
+  get pending(): { value: string; until: number } | null {
+    return this.pendingState;
+  }
+  set pending(p: { value: string; until: number } | null) {
+    this.pendingState = p && typeof p.value === 'string' && Number.isFinite(p.until) ? { value: p.value, until: p.until } : null;
   }
 
   /** Recebe o link ariranhacast://auth?… que o navegador abriu. Só aceita se foi este app que iniciou o login. */
@@ -289,7 +300,7 @@ export class LobbyClient {
   }
 
   /** Em que sala esta pessoa está agora (null = nenhuma). Aparece em "Online agora" para quem tem servidor em comum. */
-  setPresence(room: string | null, device: 'pc' | 'android', live = false): void {
+  setPresence(room: string | null, device: 'pc' | 'android' | 'web', live = false): void {
     const at = room && CODE_RE.test(room) ? room : null;
     this.presence = { room: at, device, live: !!at && live };
     const msg = JSON.stringify({ type: 'presence', ...this.presence });

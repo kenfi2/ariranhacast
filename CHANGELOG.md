@@ -10,6 +10,11 @@
   Comece a linha com "PC:" ou "Android:" quando valer só para um dos dois.
 -->
 
+## 0.10.0 (23/11/2026)
+- Novo: dá para entrar nas salas e assistir às transmissões direto pelo navegador, sem instalar nada, no endereço do AriranhaCast (/web/). Pelo site você entra com a conta do Discord, conversa na call e assiste às lives; para criar sala ou transmitir, continua sendo pelo app.
+- O link de convite de uma sala agora tem o botão "Assistir no navegador".
+- PC: na barra de amigos online aparece quem está pelo navegador.
+
 ## 0.9.4 (23/11/2026)
 - PC: o instalador agora termina numa tela "AriranhaCast instalado", com a opção "Abrir o AriranhaCast agora" (marcada) e explicando onde ficam os atalhos. Antes a janela fechava sozinha e não ficava claro como abrir o app.
 

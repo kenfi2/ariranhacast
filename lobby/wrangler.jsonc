@@ -5,6 +5,10 @@
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
 
+  // Versão web do app (assistir pelo site) em /web/. Gerada no deploy por: node scripts/build-mobile.mjs --web
+  // O Worker roda antes dos arquivos: as rotas do lobby continuam iguais e só /web/ vem daqui.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+
   "durable_objects": {
     "bindings": [{ "name": "LOBBY", "class_name": "Lobby" }]
   },
